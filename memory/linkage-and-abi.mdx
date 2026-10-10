@@ -1,0 +1,221 @@
+---
+title: "Linkage, ABI, and Binary Output in Rust"
+sidebarTitle: "Linkage & ABI"
+description: "Crate types and their linkage semantics, the link attribute, extern blocks, calling conventions, no_mangle, and ABI export attributes."
+---
+
+When Rust code is compiled, the compiler produces one or more *artifacts* — binary outputs whose format depends on how the crate is configured. The choice of artifact type determines how the compiled code can be linked with other code, whether it produces a standalone executable, a library usable from C, or an intermediate file for further Rust compilation. Beyond output format, Rust also provides fine-grained control over the Application Binary Interface (ABI): how functions pass arguments, return values, and interact at the machine level with code compiled by other languages or compilers.
+
+## Crate Types and Linkage
+
+In one compilation session, the compiler can generate multiple artifacts through command-line flags or the `crate_type` attribute. If one or more `--crate-type` command-line flags are specified, all `crate_type` attributes are ignored.
+
+| Crate type | Flag / Attribute | Description |
+|------------|-----------------|-------------|
+| `bin` | `--crate-type=bin` | A runnable executable. Requires a `main` function. All Rust and native dependencies are linked in. This is the **default** crate type. |
+| `lib` | `--crate-type=lib` | A Rust library in the compiler-recommended format (an alias for one of the specific types). Always usable by `rustc`. |
+| `rlib` | `--crate-type=rlib` | A "Rust library" file — an intermediate artifact containing metadata and object code. Used for static linking and as the default dependency format. |
+| `dylib` | `--crate-type=dylib` | A dynamic Rust library: `.so` on Linux, `.dylib` on macOS, `.dll` on Windows. For use by other Rust code. |
+| `cdylib` | `--crate-type=cdylib` | A dynamic system library for loading from another language (C, Python, etc.). Same extensions as `dylib`. |
+| `staticlib` | `--crate-type=staticlib` | A static system library: `.a` on Linux/macOS/MinGW, `.lib` on Windows MSVC. The compiler never links to `staticlib` outputs. Contains all local crate code plus all upstream dependencies. |
+| `proc-macro` | `--crate-type=proc-macro` | A procedural macro crate. Must only export procedural macros. Always compiled for the host platform. |
+
+```rust
+// In your crate root, declare the crate type:
+#![crate_type = "cdylib"]
+```
+
+### Dependency Resolution Rules
+
+When the compiler builds a crate, it resolves dependencies according to these rules:
+
+1. **Producing a static library**: All upstream dependencies must be available as `rlib`. Dynamic libraries cannot be converted into static format.
+2. **Producing an `rlib`**: No restrictions. Upstream dependencies may be in any format (only metadata is needed).
+3. **Producing an executable without `-C prefer-dynamic`**: Dependencies are first resolved from `rlib`; dynamic linking is tried only if `rlib` is unavailable.
+4. **Producing a dynamic library or dynamically-linked executable**: The compiler attempts to reconcile rlib and dylib dependencies. A library must not appear more than once in the final artifact.
+
+<Note>
+For most use cases, `--crate-type=bin` or `--crate-type=lib` is sufficient. The other types are available for fine-grained control.
+</Note>
+
+## Static and Dynamic C Runtimes
+
+Rust targets strive to support both statically and dynamically linked C runtimes. The linkage of the C runtime respects the `crt-static` target feature:
+
+```sh
+# Static C runtime:
+rustc -C target-feature=+crt-static foo.rs
+
+# Dynamic C runtime:
+rustc -C target-feature=-crt-static foo.rs
+```
+
+Code can detect which runtime is being used via `cfg`:
+
+```rust
+#[cfg(target_feature = "crt-static")]
+fn foo() {
+    println!("the C runtime should be statically linked");
+}
+
+#[cfg(not(target_feature = "crt-static"))]
+fn foo() {
+    println!("the C runtime should be dynamically linked");
+}
+```
+
+## Mixing Rust and Foreign Code
+
+When mixing Rust with C or C++ in a single binary, you have two approaches:
+
+1. **Use `rustc` as the linker**: Pass non-Rust libraries via `-L` and `-l` flags, or `#[link]` directives. Link `.o` files with `-Clink-arg=file.o`.
+2. **Use a foreign linker**: First generate a Rust `staticlib` target, then pass it to your foreign linker. Use a single `staticlib` (potentially pulling in multiple `rlib`s via `extern crate`) — multiple Rust `staticlib` files are likely to conflict.
+
+<Warning>
+Passing `rlib` files directly into a foreign linker is **not supported**.
+</Warning>
+
+## ABI Attributes
+
+### The `#[used]` Attribute
+
+The `#[used]` attribute forces a `static` to be retained in the output object file even if it is never referenced by any item in the crate. The linker may still remove it from the final binary.
+
+```rust
+// This is kept in the object file because of `#[used]`.
+#[used]
+static S1: u8 = 0;
+
+// This may be removed because it's unused.
+#[allow(dead_code)]
+static S2: u8 = 0;
+```
+
+### The `#[no_mangle]` Attribute
+
+The `#[unsafe(no_mangle)]` attribute disables symbol name mangling on a function or static. The exported symbol name becomes the item's identifier:
+
+```rust
+#[unsafe(no_mangle)]
+extern "C" fn foo() {}
+```
+
+`no_mangle` may only be applied to:
+- Static items
+- Free functions
+- Inherent associated functions
+- Trait impl functions
+
+It may not be used on closures or items with generic parameters.
+
+<Warning>
+`no_mangle` must be marked `unsafe` because an unmangled symbol name may collide with another symbol of the same name, leading to undefined behavior.
+</Warning>
+
+In addition to disabling name mangling, `no_mangle` causes the symbol to be publicly exported from the produced library or object file. The identifier must contain only ASCII characters.
+
+### The `#[link_section]` Attribute
+
+The `#[unsafe(link_section = "...")]` attribute specifies the section of the object file where a function or static's content will be placed:
+
+```rust,no_run
+#[unsafe(no_mangle)]
+#[unsafe(link_section = ".example_section")]
+pub static VAR1: u32 = 1;
+```
+
+<Warning>
+This attribute is unsafe as it allows data and code to be placed into sections of memory not expecting them, such as mutable data into read-only sections.
+</Warning>
+
+### The `#[export_name]` Attribute
+
+The `#[unsafe(export_name = "...")]` attribute specifies the exported symbol name for a function or static:
+
+```rust
+#[unsafe(export_name = "exported_symbol_name")]
+pub fn name_in_rust() { }
+```
+
+<Warning>
+This attribute is unsafe because a custom symbol name may collide with another symbol of the same name, leading to undefined behavior.
+</Warning>
+
+## External Blocks and the `link` Attribute
+
+External (`extern`) blocks declare functions and statics that exist in other compiled libraries. The `#[link]` attribute on an `extern` block tells the linker which native library to link against:
+
+```rust
+#[link(name = "crypto")]
+unsafe extern "C" {
+    fn RAND_bytes(buf: *mut u8, num: usize) -> i32;
+}
+```
+
+The `#[link]` attribute supports these keys:
+
+| Key | Description |
+|-----|-------------|
+| `name` | The name of the native library (without the `lib` prefix or file extension) |
+| `kind` | How to link: `"dylib"` (default), `"static"`, `"framework"` (macOS), `"raw-dylib"` (Windows) |
+| `modifiers` | Comma-separated modifiers like `+whole-archive`, `-bundle`, `+verbatim` |
+| `cfg` | Conditional compilation predicate |
+| `wasm_import_module` | WebAssembly import module name |
+
+```rust
+// Link a static library:
+#[link(name = "mylib", kind = "static")]
+unsafe extern "C" {
+    fn my_c_function(x: i32) -> i32;
+}
+```
+
+## Function ABIs (Calling Conventions)
+
+Rust functions can be declared with different calling conventions via the `extern "ABI"` qualifier. The ABI string determines how arguments are passed and the stack is managed.
+
+| ABI string | Description |
+|-----------|-------------|
+| `"Rust"` | The default Rust ABI. Not stable across compiler versions. |
+| `"C"` | The platform's C calling convention. Standard for FFI with C. Does not allow unwinding. |
+| `"C-unwind"` | Same as `"C"` but allows panics/exceptions to unwind through the frame. |
+| `"system"` | On Windows: `"stdcall"`. On all other platforms: `"C"`. |
+| `"cdecl"` | The x86 C declaration calling convention. |
+| `"stdcall"` | The x86 stdcall convention (used by Win32 API on 32-bit Windows). |
+| `"fastcall"` | x86 fastcall convention. |
+| `"win64"` | Microsoft x86-64 calling convention. |
+| `"sysv64"` | System V AMD64 ABI. |
+| `"aapcs"` | ARM Procedure Call Standard. |
+| `"ptx-kernel"` | PTX kernel (NVIDIA GPU). |
+| `"wasm"` | WebAssembly calling convention. |
+
+```rust
+// Declaring a C-compatible extern function:
+unsafe extern "C" {
+    fn abs(input: i32) -> i32;
+}
+
+// Exporting a Rust function with the C ABI:
+#[unsafe(no_mangle)]
+pub extern "C" fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+```
+
+<Note>
+The `"Rust"` ABI is the default when no `extern` qualifier is given. It is intentionally unstable — its layout may change between compiler versions — and should not be used for FFI. Always use `"C"` or another stable ABI when interfacing with other languages.
+</Note>
+
+## Linkage and Unwinding
+
+Panic unwinding can only be used if the binary is built consistently. A Rust artifact is *potentially unwinding* if:
+
+- It uses the `unwind` panic handler.
+- It contains a crate built with the `unwind` panic strategy that makes a call using a `-unwind` ABI.
+- It makes a `"Rust"` ABI call to code in another Rust artifact with a separate copy of the runtime that is potentially unwinding.
+
+If a Rust artifact is potentially unwinding, **all its crates must be built with the `unwind` panic strategy**. Mixing `unwind` and `abort` crates in a potentially-unwinding artifact is undefined behavior.
+
+<Note>
+If you use `rustc` to link, these rules are enforced automatically. If you use a foreign linker (including `dlopen`), you must ensure consistency manually.
+</Note>

@@ -1,0 +1,208 @@
+---
+title: "Constant Evaluation in Rust: const fn and Static Initializers"
+sidebarTitle: "Const Evaluation"
+description: "How Rust evaluates expressions at compile time: const contexts, const fn, static initializers, what is allowed, and what is prohibited."
+---
+
+Constant evaluation is the process of computing the result of expressions during compilation rather than at runtime. Rust has an expressive compile-time evaluation system: many programs can compute values, call functions, and even perform loops and conditionals entirely at compile time. Values computed this way are embedded directly in the binary, eliminating runtime overhead and enabling powerful compile-time guarantees. Understanding constant evaluation is crucial for writing efficient generic code, defining true compile-time constants, and leveraging features like const generics.
+
+## What Is Constant Evaluation?
+
+Constant evaluation refers to the compile-time execution of *constant expressions* — expressions that the compiler can fully evaluate before the program runs. The result of a constant expression is a concrete value embedded in the compiled output.
+
+Expressions in *const contexts* (see below) **must** be constant expressions and are **always** evaluated at compile time. Outside const contexts, constant expressions *may* be evaluated at compile time, but this is not guaranteed.
+
+```rust
+const MAX_SIZE: usize = 1024 * 1024; // evaluated at compile time
+const GREETING: &str = "hello, world"; // string literal, compile time
+```
+
+## Constant Contexts
+
+A *const context* is a location in Rust source where an expression must be a constant expression. The following are const contexts:
+
+| Context | Example |
+|---------|---------|
+| Array type length expressions | `[u8; 256]` |
+| Array repeat length expressions | `[0u8; 1024]` |
+| Initializer of a `const` item | `const N: i32 = 42;` |
+| Initializer of a `static` item | `static S: i32 = 99;` |
+| Enum discriminant | `enum Foo { A = 1 << 8 }` |
+| Const generic argument | `struct Array<const N: usize>([i32; N]);` |
+| Const blocks | `const { some_computation() }` |
+
+```rust
+// Array length must be a const expression:
+const BUFFER_SIZE: usize = 4096;
+let buf: [u8; BUFFER_SIZE] = [0u8; BUFFER_SIZE];
+
+// Enum discriminants:
+enum Status {
+    Active = 1,
+    Inactive = 1 << 1,
+    Pending = 1 << 2,
+}
+
+// Const generic:
+struct FixedVec<const N: usize> {
+    data: [i32; N],
+    len: usize,
+}
+```
+
+Array type length expressions, array repeat length expressions, and const generic arguments are restricted: they must either be a single const generic parameter or an expression that does not reference any generic parameters.
+
+<Note>
+Behaviors such as out-of-bounds array indexing or integer overflow are **compiler errors** in const contexts. In non-const contexts, they may panic at runtime.
+</Note>
+
+## Constant Expressions
+
+The following expressions are constant expressions, provided all operands are also constant expressions and no `Drop::drop` calls would be executed:
+
+- **Literals**: integer, float, string, char, bool, byte literals.
+- **Const parameters**: values of const generic parameters.
+- **Paths to functions and constants**: paths to `const fn` or `const` items (no recursive definitions).
+- **Paths to statics**: with restrictions on mutable statics and extern statics.
+- **Tuple expressions**: `(1, 2, 3)`.
+- **Array expressions**: `[0u8; 256]`.
+- **Struct expressions**: `Point { x: 1, y: 2 }`.
+- **Block expressions**: including `unsafe` and `const` blocks; `let` statements, assignments, and expression statements within.
+- **Field expressions**: `point.x`.
+- **Array and slice indexing**: `arr[0]` (index must be `usize`).
+- **Range expressions**: `0..10`.
+- **Closure expressions**: closures that don't capture variables from the environment.
+- **Built-in arithmetic, logical, and comparison operators**: on integer, float, bool, and char types.
+- **Borrows**: all forms including raw borrows, with restrictions on mutable borrows and borrows of interior-mutable temporaries with extended lifetimes.
+- **Dereference expressions**.
+- **Grouped expressions**: `(expr)`.
+- **Cast expressions**: except pointer-to-address and function-pointer-to-address casts.
+- **Calls to `const fn`** and `const` methods.
+- **`loop`** and **`while`** expressions.
+- **`if`** and **`match`** expressions.
+
+## Const Functions
+
+A *const function* is a function callable from a const context. It is declared with the `const` qualifier:
+
+```rust
+const fn square(x: i32) -> i32 {
+    x * x
+}
+
+const AREA: i32 = square(12); // evaluated at compile time: 144
+```
+
+When called from a const context, a `const fn` is interpreted by the compiler at compile time. The interpretation happens in the environment of the **compilation target**, not the host. So `usize` is 32 bits when compiling for a 32-bit target, regardless of the host machine.
+
+When called outside a const context, a `const fn` behaves identically to a regular function:
+
+```rust
+const fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+// Called at compile time:
+const SUM: i32 = add(3, 4);
+
+// Called at runtime (also valid):
+fn main() {
+    let x = add(3, 4); // runtime call, same result
+}
+```
+
+### What Is Allowed in `const fn`
+
+The body of a `const fn` may only use constant expressions. This includes most of the constructs listed above: arithmetic, conditionals, loops, let bindings, field access, and calls to other `const fn`s.
+
+```rust
+const fn fibonacci(n: u64) -> u64 {
+    if n <= 1 {
+        n
+    } else {
+        fibonacci(n - 1) + fibonacci(n - 2)
+    }
+}
+
+const FIB_10: u64 = fibonacci(10); // 55
+```
+
+```rust
+const fn max_of(a: usize, b: usize) -> usize {
+    if a > b { a } else { b }
+}
+
+const CAPACITY: usize = max_of(256, 512); // 512
+```
+
+### What Is Not Allowed in `const fn`
+
+Several features are **not allowed** in const functions:
+
+- **Heap allocation**: `Box::new`, `Vec::new`, dynamic allocation in general (unless the function is marked to allow it).
+- **Async**: `const fn` may not be `async fn`.
+- **Trait method calls** where the trait does not have a `const` implementation — only traits with `const` bounds can be used in const context.
+- **Pointer-to-integer casts**: casting a pointer to `usize` is not allowed in const evaluation.
+- **Function pointer to address casts**.
+
+```rust,compile_fail
+const fn bad_const() -> Box<i32> {
+    Box::new(42) // ERROR: heap allocation not allowed in const fn
+}
+```
+
+<Note>
+The set of operations allowed in `const fn` continues to expand with each Rust release. Many things that were once disallowed (like loops, match expressions, and mutable variables) are now permitted.
+</Note>
+
+## Const Blocks
+
+A *const block* is an inline const expression, written as `const { ... }`. It creates an anonymous const context at expression position:
+
+```rust
+let buffer_size = const { 1024 * 1024 };
+
+fn process<const N: usize>(arr: [i32; N]) -> i32 {
+    let limit = const { N / 2 }; // const block as expression
+    arr[limit]
+}
+```
+
+Const blocks follow the same rules as initializers of `const` items.
+
+## Statics in Const Contexts
+
+Paths to statics are allowed in const evaluation with the following restrictions:
+
+- **Writes** to `static` items are not allowed in any const evaluation context.
+- **Reads from `extern` statics** are not allowed in any const evaluation context.
+- **Reads from mutable statics** (`static mut` or `static` with interior mutability) are not allowed *unless* the evaluation is in a `static` item initializer.
+
+These requirements are checked only when the code is actually executed during const evaluation. Having such accesses syntactically in a const context is allowed if they are never reached.
+
+## Tuple Struct and Tuple Enum Variant Constructors
+
+Tuple struct constructors and tuple enum variant constructors are also considered `const fn`s:
+
+```rust
+struct Point(i32, i32);
+
+const ORIGIN: Point = Point(0, 0); // constructor called at compile time
+```
+
+## Compile-Time Error Behavior
+
+Out-of-bounds indexing and integer overflow in const contexts are compile-time errors:
+
+```rust,compile_fail
+const fn bad_index() -> i32 {
+    let arr = [1, 2, 3];
+    arr[10] // ERROR: index out of bounds at compile time
+}
+
+const fn overflow() -> u8 {
+    255u8 + 1 // ERROR: attempt to add with overflow
+}
+```
+
+This compile-time detection is one of the key benefits of placing computations in const contexts — errors that would otherwise be runtime panics become compile-time failures.

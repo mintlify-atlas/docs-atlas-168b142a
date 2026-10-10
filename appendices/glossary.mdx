@@ -1,0 +1,309 @@
+---
+title: "Rust Reference Glossary of Terms and Concepts"
+sidebarTitle: "Glossary"
+description: "Comprehensive glossary of Rust language terms covering types, memory, traits, generics, patterns, and more — with concise definitions."
+---
+
+This glossary defines terms and concepts used throughout the Rust Reference. Terms appear in alphabetical order. Where a concept is documented in detail elsewhere, a cross-reference is provided.
+
+---
+
+### Abstract Syntax Tree (AST)
+
+An *abstract syntax tree* (AST) is an intermediate representation of the structure of a program that the compiler builds during parsing. The compiler uses the AST to analyze, type-check, and ultimately generate code.
+
+---
+
+### Alignment
+
+The *alignment* of a value specifies which memory addresses it may start at. Alignment is always a power of two. For example, a `u32` typically has an alignment of 4, meaning it must start at an address divisible by 4. References to a value must be aligned.
+
+---
+
+### Application Binary Interface (ABI)
+
+An *application binary interface* (ABI) defines how compiled code interacts with other compiled code at the binary level:
+
+- **Calling convention**: How function arguments are passed, values returned, and the stack cleaned up.
+- **Unwinding**: Whether stack unwinding is allowed across function boundaries.
+
+Rust's `extern "C"`, `extern "Rust"`, `extern "system"`, and other ABI strings control this at the source level.
+
+---
+
+### Arity
+
+*Arity* is the number of arguments a function or operator takes. For example, `f(2, 3)` has arity 2, `h(8, 2, 6)` has arity 3, and the `!` operator has arity 1.
+
+---
+
+### Array
+
+An *array* is a fixed-size collection of elements of the same type, stored contiguously in memory. Written as `[T; N]` where `T` is the element type and `N` is the length, a compile-time constant. Contrast with *slice* (`[T]`), which is dynamically sized.
+
+---
+
+### Associated Item
+
+An *associated item* is an item (function, constant, or type alias) associated with another item. Associated items are defined in *implementations* and declared in *traits*. Contrast with a *free item*.
+
+```rust
+trait Summary {
+    type Output;              // associated type
+    const MAX: usize;         // associated constant
+    fn summarize(&self) -> String; // associated function
+}
+```
+
+---
+
+### Blanket Implementation
+
+A *blanket implementation* is an `impl` where a type appears uncovered (not wrapped in another type). For example, `impl<T: Display> ToString for T` is a blanket implementation because `T` is uncovered. Blanket implementations apply to all types that satisfy the bound.
+
+---
+
+### Bound
+
+A *bound* is a constraint on a type or trait. Bounds are written with `:` syntax in generics: `T: Clone` means "`T` must implement `Clone`". Lifetime bounds (`T: 'a`) require a type to outlive a given lifetime.
+
+---
+
+### Crate
+
+A *crate* is the unit of compilation and linking in Rust. A crate has a self-contained tree of modules starting from an unnamed root (the crate root). Crates can be executables (`bin`), libraries (`lib`, `rlib`, `dylib`, etc.), or proc-macros. Items may be made visible to other crates by being `pub` in the crate root.
+
+---
+
+### Dangling Pointer
+
+A *dangling pointer* is a reference or pointer where not all of the bytes it points to are part of the same live allocation. Accessing a dangling pointer is undefined behavior. Zero-sized types are an exception: a pointer to a ZST is never dangling.
+
+---
+
+### Data Race
+
+A *data race* occurs when two or more threads access the same memory location concurrently, at least one access is a write, and the accesses are not synchronized. Data races are always undefined behavior in Rust.
+
+---
+
+### Deref Coercion
+
+A *deref coercion* is an implicit coercion that automatically applies the `Deref` (or `DerefMut`) trait to convert one type to another. For example, `&String` coerces to `&str` because `String` implements `Deref<Target = str>`. Deref coercions chain: `&&String` also coerces to `&str`.
+
+---
+
+### Discriminant
+
+The *discriminant* of an enum value is the value that identifies which variant is currently active. Rust typically stores this as an integer. In `enum Foo { A = 1, B = 2 }`, the discriminant of `Foo::A` is `1`. Discriminants can be queried with `std::mem::discriminant`.
+
+---
+
+### Dispatch
+
+*Dispatch* is the mechanism that determines which specific version of code runs at a polymorphic call site. Rust supports:
+
+- **Static dispatch**: the concrete type is known at compile time; the compiler generates a specific call. Used with generics and `impl Trait` parameters.
+- **Dynamic dispatch**: the concrete type is looked up at runtime via a vtable. Used with `dyn Trait` trait objects.
+
+---
+
+### Dynamically Sized Type (DST)
+
+A *dynamically sized type* (DST) is a type whose size and alignment are not known at compile time. DSTs include slices (`[T]`), `str`, and trait objects (`dyn Trait`). DSTs can only be used behind a pointer (e.g., `&[T]`, `Box<dyn Trait>`). The pointer carries metadata (length or vtable) alongside the address.
+
+---
+
+### Expression
+
+An *expression* is a syntactic construct that evaluates to a value. Expressions may have side effects. For example, `2 + (3 * 4)` evaluates to `14`. In Rust, blocks, `if`, `match`, and `loop` are also expressions.
+
+---
+
+### Fat Pointer
+
+A *fat pointer* (also called a *wide pointer*) is a pointer that carries metadata in addition to the memory address. Fat pointers are used for DSTs:
+
+- Slice fat pointer: address + length.
+- Trait object fat pointer: address + pointer to vtable.
+
+Regular pointers to sized types are *thin pointers* (address only).
+
+---
+
+### Free Item
+
+A *free item* is an item that is not a member of any implementation — such as a free function or a free constant defined directly in a module. Contrast with an *associated item*.
+
+---
+
+### Glob Import
+
+A *glob import* (written `use some::module::*`) imports all public items from a module into the current scope.
+
+---
+
+### Hygienic Macro
+
+A *hygienic macro* is a macro whose generated identifiers do not accidentally capture or be captured by identifiers in the surrounding code. Rust's `macro_rules!` macros are hygienic with respect to local variables but not with respect to items.
+
+---
+
+### Inherent Implementation
+
+An *inherent implementation* (`impl Type { ... }`) defines methods and associated functions on a nominal type directly, without implementing a trait. Methods in an inherent impl can be called without qualifying the trait name.
+
+---
+
+### Initialized
+
+A variable is *initialized* if it has been assigned a value and has not since been moved from. All other memory locations are assumed to be uninitialized. Only `unsafe` Rust can create a memory location without initializing it (via `MaybeUninit`).
+
+---
+
+### Item
+
+An *item* is a component of a crate. Items include functions, structs, enums, unions, type aliases, traits, implementations, modules, extern blocks, use declarations, static items, constant items, and macro definitions.
+
+---
+
+### Lifetime
+
+A *lifetime* (written `'a`) is a named region of code during which a reference is valid. Lifetimes are checked by the borrow checker to ensure references do not outlive the data they point to. The special lifetime `'static` means the reference is valid for the entire program.
+
+---
+
+### Local Type
+
+A `struct`, `enum`, or `union` defined in the current crate. Locality is not affected by type arguments: `struct Foo` is local regardless of what types are substituted into its generic parameters. Type aliases do not affect locality.
+
+---
+
+### Monomorphization
+
+*Monomorphization* is the process by which the compiler generates specific, concrete code for each generic instantiation. For example, `Vec<i32>` and `Vec<String>` produce separate compiled code. Monomorphization enables zero-cost abstractions but can increase binary size.
+
+---
+
+### Nominal Type
+
+A *nominal type* is a type identified by name (a path). In Rust: enums, structs, unions, and trait objects. Nominal types can be referred to by path directly. Contrast with structural types like tuples and arrays.
+
+---
+
+### Object Safety (Dyn-Compatibility)
+
+A trait is *dyn-compatible* (formerly called *object safe*) if it can be used as the target of a `dyn Trait` type. A trait is dyn-compatible if it follows certain rules, including: no generic type parameters, no `Self: Sized` bounds on the trait, and all methods must be dispatchable (no methods that return `Self` by value without a bound, etc.).
+
+---
+
+### Opaque Type
+
+An *opaque type* is a type whose concrete identity is hidden from the caller. In Rust, `impl Trait` in return position produces an opaque type: the caller knows the returned value implements `Trait`, but not what the concrete type is.
+
+---
+
+### Orphan Rule
+
+The *orphan rule* is a restriction on where `impl Trait for Type` may be written: at least one of `Trait` or `Type` must be defined in the current crate. This prevents conflicting implementations from different crates.
+
+---
+
+### Owned Pointer
+
+An *owned pointer* is a pointer that has exclusive ownership of the data it points to — responsible for deallocating it when dropped. `Box<T>` is Rust's owned heap pointer. Moving an owned pointer transfers ownership.
+
+---
+
+### Place Expression
+
+A *place expression* is an expression that denotes a memory location (a "place" in memory). Place expressions include variables, dereferences (`*expr`), field access (`expr.field`), and array indexing (`expr[i]`). Place expressions can be assigned to. Contrast with *value expressions*, which produce a value without referring to a specific memory location.
+
+---
+
+### Prelude
+
+The *prelude* is a small collection of items — mostly traits and types — that are automatically imported into every module of every crate. The standard library prelude includes traits like `Clone`, `Copy`, `Iterator`, `Into`, `From`, `Option`, `Result`, and many others.
+
+---
+
+### Raw Pointer
+
+A *raw pointer* (`*const T` or `*mut T`) is a pointer that is not subject to Rust's borrow checker. Raw pointers may be null, dangling, or misaligned. Dereferencing them requires an `unsafe` block. Raw pointers are the primary tool for FFI and low-level unsafe code.
+
+---
+
+### Scrutinee
+
+The *scrutinee* is the expression being matched on in a `match` expression, `if let`, `while let`, or other pattern-matching construct. In `match x { A => 1, B => 2 }`, `x` is the scrutinee.
+
+---
+
+### Slice
+
+A *slice* (`[T]`) is a dynamically-sized view into a contiguous sequence of elements. Slices are always accessed through a reference: `&[T]` (shared) or `&mut [T]` (mutable). The reference carries both a pointer and a length.
+
+---
+
+### Sound Code
+
+*Sound* code is `unsafe` code that cannot be misused by safe code to produce undefined behavior. A `unsafe` abstraction that exposes a safe API is sound if no combination of valid safe API calls can trigger UB. The opposite is *unsound*.
+
+---
+
+### Statement
+
+A *statement* is the smallest standalone element that commands a computer to perform an action. In Rust, statements include `let` statements, expression statements, and item declarations. Unlike expressions, statements do not produce a value (or produce `()`).
+
+---
+
+### String Slice
+
+A *string slice* (`str`) is the most primitive string type in Rust. String slices are always valid UTF-8. They are always accessed through a reference: `&str` (shared) or `&mut str` (mutable). A string literal has type `&'static str`.
+
+---
+
+### Trait Object
+
+A *trait object* (`dyn Trait`) is a dynamically-typed value that implements a trait. Trait objects use *dynamic dispatch*: method calls are resolved at runtime through a vtable. Trait objects are always accessed through a pointer: `&dyn Trait`, `Box<dyn Trait>`, etc.
+
+---
+
+### Turbofish
+
+*Turbofish* syntax (`::<>`) is used to provide explicit type arguments to a generic function or method in an expression context. The `::` is necessary to disambiguate from comparison operators:
+
+```rust
+let ok_num = Ok::<_, ()>(5);
+let vec = [1, 2, 3].iter().map(|n| n * 2).collect::<Vec<_>>();
+```
+
+---
+
+### Type Alias
+
+A *type alias* (`type Foo = Bar`) introduces a new name for an existing type. Type aliases are transparent: `Foo` and `Bar` are interchangeable. Type aliases do not create new types (unlike `struct` wrappers). Opaque type aliases (in traits and `impl Trait`) do create distinct types.
+
+---
+
+### Uninitialized Memory
+
+*Uninitialized memory* is memory that has been allocated but not written. Reading from uninitialized memory is undefined behavior for most types. The type `MaybeUninit<T>` provides a safe way to work with potentially-uninitialized values.
+
+---
+
+### Undefined Behavior (UB)
+
+*Undefined behavior* is compile-time or runtime behavior that is not specified by the Rust language. Programs that exhibit UB may produce arbitrary results: crashes, wrong output, or seemingly correct behavior. Undefined behavior is a contract violation — the compiler is permitted to assume it never occurs and optimize accordingly.
+
+---
+
+### Vtable
+
+A *vtable* (virtual dispatch table) is a compiler-generated structure that maps trait method names to function pointers for a specific concrete type. When a trait object (`dyn Trait`) is created, the compiler pairs the data pointer with a pointer to the vtable, enabling runtime dispatch.
+
+---
+
+### Zero-Sized Type (ZST)
+
+A *zero-sized type* (ZST) is a type whose size is 0 bytes. ZSTs have at most one possible value. Common ZSTs include `()` (the unit type), `PhantomData<T>`, empty structs `struct Foo {}`, and arrays of length zero `[u8; 0]`. ZSTs do not occupy memory and pointers to them are never dangling.

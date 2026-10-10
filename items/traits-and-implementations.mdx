@@ -1,0 +1,270 @@
+---
+title: "Traits and Implementations in Rust"
+sidebarTitle: "Traits & Impls"
+description: "Defining and implementing Rust traits: associated items, default methods, unsafe traits, supertraits, inherent impls, and the orphan rule."
+---
+
+Traits and implementations are how Rust achieves polymorphism. A _trait_ describes an abstract interface — a contract that types can implement. An _implementation_ associates items with a concrete type, either as an inherent block or as a trait implementation. Together, they enable generic programming with static dispatch, dynamic dispatch via trait objects, and principled code sharing across unrelated types.
+
+## Trait definitions
+
+A _trait_ describes an abstract interface that types can implement. This interface consists of _associated items_, which come in three varieties: functions (including methods), types, and constants. The trait declaration defines a trait in the [type namespace] of the module or block where it is located.
+
+```rust
+// Examples of associated trait items with and without definitions.
+trait Example {
+    const CONST_NO_DEFAULT: i32;
+    const CONST_WITH_DEFAULT: i32 = 99;
+    type TypeNoDefault;
+    fn method_without_default(&self);
+    fn method_with_default(&self) {}
+}
+```
+
+All traits define an implicit type parameter `Self` that refers to the type implementing the interface. Traits may also contain additional type parameters.
+
+### Default implementations
+
+Trait functions may omit the function body by replacing it with a semicolon, indicating the implementation must define the function. If the trait function defines a body, this definition acts as a default for any implementation which does not override it:
+
+```rust
+trait Greet {
+    fn name(&self) -> String;
+
+    fn hello(&self) {
+        println!("Hello, {}!", self.name());
+    }
+}
+
+struct English;
+impl Greet for English {
+    fn name(&self) -> String {
+        "world".to_string()
+    }
+    // `hello` uses the default implementation
+}
+```
+
+<Note>
+Trait functions are not allowed to be `const`.
+</Note>
+
+### Generic traits
+
+Type parameters can be specified for a trait to make it generic. They appear after the trait name:
+
+```rust
+trait Seq<T> {
+    fn len(&self) -> u32;
+    fn elt_at(&self, n: u32) -> T;
+    fn iter<F>(&self, f: F) where F: Fn(T);
+}
+```
+
+## Supertraits
+
+**Supertraits** are traits that are required to be implemented for a type to implement a specific trait. A generic or trait object bounded by a trait also has access to the associated items of its supertraits. Supertraits are declared by trait bounds on the `Self` type:
+
+```rust
+trait Shape { fn area(&self) -> f64; }
+trait Circle: Shape { fn radius(&self) -> f64; }
+```
+
+Using where clauses (equivalent form):
+
+```rust
+trait Shape { fn area(&self) -> f64; }
+trait Circle where Self: Shape { fn radius(&self) -> f64; }
+```
+
+Supertrait methods can be used inside the subtrait with a default implementation:
+
+```rust
+# trait Shape { fn area(&self) -> f64; }
+trait Circle where Self: Shape {
+    fn radius(&self) -> f64 {
+        // A = pi * r^2, so r = sqrt(A / pi)
+        (self.area() / std::f64::consts::PI).sqrt()
+    }
+}
+```
+
+Supertrait methods are also accessible on generic parameters and trait objects:
+
+```rust
+# trait Shape { fn area(&self) -> f64; }
+# trait Circle: Shape { fn radius(&self) -> f64; }
+fn print_area_and_radius<C: Circle>(c: C) {
+    println!("Area: {}", c.area());
+    println!("Radius: {}", c.radius());
+}
+```
+
+## Unsafe traits
+
+Traits that begin with the `unsafe` keyword indicate that _implementing_ the trait may be unsafe. It is safe to use a correctly implemented unsafe trait. The trait implementation must also begin with the `unsafe` keyword.
+
+```rust
+unsafe trait SomeSafetyGuarantee {
+    fn get_ptr(&self) -> *const u8;
+}
+
+struct MyType;
+
+unsafe impl SomeSafetyGuarantee for MyType {
+    fn get_ptr(&self) -> *const u8 {
+        self as *const Self as *const u8
+    }
+}
+```
+
+`Sync` and `Send` are examples of unsafe traits from the standard library.
+
+## Dyn compatibility
+
+A dyn-compatible trait can be the base trait of a trait object (`dyn Trait`). A trait is _dyn compatible_ if it meets the following requirements:
+
+- All supertraits must also be dyn compatible
+- `Sized` must not be a supertrait (it must not require `Self: Sized`)
+- It must not have any associated constants
+- It must not have any associated types with generics
+- All associated functions must either be dispatchable from a trait object or be explicitly non-dispatchable (with a `where Self: Sized` bound)
+
+```rust
+# use std::rc::Rc;
+# use std::sync::Arc;
+# use std::pin::Pin;
+// Examples of dyn compatible methods.
+trait TraitMethods {
+    fn by_ref(self: &Self) {}
+    fn by_ref_mut(self: &mut Self) {}
+    fn by_box(self: Box<Self>) {}
+    fn by_rc(self: Rc<Self>) {}
+    fn by_arc(self: Arc<Self>) {}
+    fn by_pin(self: Pin<&Self>) {}
+    fn with_lifetime<'a>(self: &'a Self) {}
+    fn nested_pin(self: Pin<Arc<Self>>) {}
+}
+```
+
+<Note>
+This concept was formerly known as *object safety*. The terminology changed to *dyn compatibility* to better reflect what the requirement is actually about.
+</Note>
+
+## Inherent implementations
+
+An inherent implementation associates items directly with a type without involving a trait. It is defined as the sequence of the `impl` keyword, generic type declarations, a path to a nominal type, a where clause, and a bracketed set of associated items.
+
+Inherent implementations can contain associated functions (including methods) and associated constants — but not associated type aliases. A type can have multiple inherent implementations. An implementing type must be defined within the same crate as the original type definition.
+
+```rust
+pub mod color {
+    pub struct Color(pub u8, pub u8, pub u8);
+
+    impl Color {
+        pub const WHITE: Color = Color(255, 255, 255);
+    }
+}
+
+mod values {
+    use super::color::Color;
+    impl Color {
+        pub fn red() -> Color {
+            Color(255, 0, 0)
+        }
+    }
+}
+
+pub use self::color::Color;
+fn main() {
+    color::Color::WHITE;
+    color::Color::red();
+    Color::red();
+}
+```
+
+## Trait implementations
+
+A trait implementation is defined like an inherent implementation except that the optional generic type declarations are followed by a trait, followed by the keyword `for`, followed by a path to a nominal type.
+
+A trait implementation must define all non-default associated items declared by the implemented trait, may redefine default associated items, and cannot define any other items.
+
+```rust
+# #[derive(Copy, Clone)]
+# struct Point { x: f64, y: f64 }
+# type Surface = i32;
+# struct BoundingBox { x: f64, y: f64, width: f64, height: f64 }
+# trait Shape { fn draw(&self, s: Surface); fn bounding_box(&self) -> BoundingBox; }
+# fn do_draw_circle(s: Surface, c: Circle) {}
+struct Circle {
+    radius: f64,
+    center: Point,
+}
+
+impl Copy for Circle {}
+
+impl Clone for Circle {
+    fn clone(&self) -> Circle { *self }
+}
+
+impl Shape for Circle {
+    fn draw(&self, s: Surface) { do_draw_circle(s, *self); }
+    fn bounding_box(&self) -> BoundingBox {
+        let r = self.radius;
+        BoundingBox {
+            x: self.center.x - r,
+            y: self.center.y - r,
+            width: 2.0 * r,
+            height: 2.0 * r,
+        }
+    }
+}
+```
+
+Unsafe traits require the trait implementation to begin with the `unsafe` keyword.
+
+### The orphan rule
+
+The _orphan rule_ states that a trait implementation is only allowed if either the trait or at least one of the types in the implementation is defined in the current crate. This prevents conflicting trait implementations across different crates and is key to ensuring coherence.
+
+Given `impl<P1..=Pn> Trait<T1..=Tn> for T0`, an `impl` is valid only if at least one of the following is true:
+
+- `Trait` is a local trait, **or**
+- At least one of the types `T0..=Tn` is a local type, and no uncovered type parameters appear in the positions before that type
+
+<Warning>
+The orphan rule exists to prevent conflicts when two crates each try to implement the same foreign trait for the same foreign type. Without it, adding a new blanket implementation to a library could break downstream code.
+</Warning>
+
+### Generic implementations
+
+An implementation can take generic parameters:
+
+```rust
+# trait Seq<T> { fn dummy(&self, _: T) {} }
+impl<T> Seq<T> for Vec<T> {
+    // ...
+}
+impl Seq<bool> for u32 {
+    // Treat the integer as a sequence of bits
+}
+```
+
+## Parameter patterns in traits
+
+Parameters in associated functions without a body only allow `IDENTIFIER` or `_` wildcard patterns, plus `SelfParam` forms:
+
+```rust
+trait T {
+    fn f1(&self);
+    fn f2(x: Self, _: i32);
+}
+```
+
+Parameters in associated functions with a body allow all irrefutable patterns:
+
+```rust
+trait T {
+    fn f1((a, b): (i32, i32)) {} // OK: irrefutable
+}
+```

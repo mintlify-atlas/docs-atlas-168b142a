@@ -1,0 +1,219 @@
+---
+title: "Unsafety in Rust: The unsafe Keyword and Safe Abstractions"
+sidebarTitle: "Overview"
+description: "What unsafe means in Rust, the eight operations that require it, unsafe blocks vs functions vs traits, and building safe abstractions."
+---
+
+Rust's safety guarantees are enforced at compile time through its type system and borrow checker. For the majority of programs, these guarantees are maintained automatically — you cannot cause data races or dereference dangling pointers in safe Rust. However, there are operations that the compiler cannot statically verify as safe, either because they require reasoning that goes beyond the type system or because they interact with hardware, operating systems, or other languages that don't share Rust's safety model. These operations require the `unsafe` keyword, which is not a warning or a hint, but a formal contract: the programmer asserts that they have verified the relevant safety conditions.
+
+## The Unsafe Contract
+
+The `unsafe` keyword is used in two complementary roles:
+
+1. **Defining** extra safety conditions that must be upheld elsewhere:
+   - `unsafe fn` — the function has preconditions callers must satisfy.
+   - `unsafe static` — accessing this static has safety conditions.
+   - `unsafe trait` — implementations must uphold the trait's invariants.
+
+2. **Asserting** that safety conditions defined elsewhere have been satisfied:
+   - `unsafe {}` blocks — the programmer declares that all unsafe operations within are sound.
+   - `unsafe impl` — the programmer declares the trait's safety conditions are met.
+   - `unsafe extern` — the programmer asserts that the FFI signatures are correct.
+   - `#[unsafe(attr)]` — the programmer asserts that the attribute's conditions are met.
+
+## The Unsafe Operations
+
+The following operations cannot be used in safe Rust. Each requires either an `unsafe` block or an `unsafe fn` context:
+
+### 1. Dereferencing a raw pointer
+
+Raw pointers (`*const T` and `*mut T`) are not subject to the borrow checker. Dereferencing them may access invalid memory, misaligned memory, or violate aliasing rules:
+
+```rust
+let x: i32 = 42;
+let raw = &x as *const i32;
+
+// SAFE: we know `raw` is valid
+let value = unsafe { *raw };
+println!("{}", value);
+```
+
+### 2. Reading or writing a mutable or unsafe static variable
+
+Mutable statics are inherently subject to data races in a multi-threaded program:
+
+```rust
+static mut COUNTER: u32 = 0;
+
+unsafe {
+    COUNTER += 1;
+    println!("{}", COUNTER);
+}
+```
+
+### 3. Accessing a field of a union
+
+Unions store multiple types at the same memory location. Reading a union field is unsafe because the compiler cannot verify which variant is currently valid:
+
+```rust
+union MyUnion {
+    integer: u32,
+    float: f32,
+}
+
+let u = MyUnion { integer: 42 };
+let value = unsafe { u.integer }; // safe access to `integer`
+```
+
+### 4. Calling an unsafe function
+
+Unsafe functions have preconditions that callers must uphold. The function signature uses `unsafe fn`:
+
+```rust
+unsafe fn dangerous_operation(ptr: *mut i32) {
+    *ptr += 1;
+}
+
+let mut x = 10;
+unsafe {
+    dangerous_operation(&mut x);
+}
+```
+
+### 5. Implementing an unsafe trait
+
+Some traits have invariants that cannot be checked by the compiler. For example, `Send` and `Sync` are unsafe traits:
+
+```rust
+struct MyType(*mut i32);
+
+// SAFETY: We guarantee this type is safe to send across threads.
+unsafe impl Send for MyType {}
+```
+
+### 6. Declaring an `extern` block (2024 edition)
+
+External blocks declare functions and statics from other languages. The programmer must assert that the signatures are correct:
+
+```rust
+unsafe extern "C" {
+    fn strlen(s: *const u8) -> usize;
+}
+```
+
+<Note>
+Prior to the 2024 edition, `extern` blocks did not require the `unsafe` keyword. From Rust 2024 onward, `extern` blocks must be qualified as `unsafe extern`.
+</Note>
+
+### 7. Applying an unsafe attribute
+
+Some attributes have safety conditions that the compiler cannot verify. These must use the `unsafe(...)` syntax:
+
+```rust
+#[unsafe(no_mangle)]
+pub extern "C" fn my_exported_function() {}
+```
+
+## Unsafe Blocks
+
+An `unsafe {}` block permits the use of unsafe operations within it. By writing an unsafe block, the programmer declares they have verified that all unsafe operations inside the block satisfy their safety conditions:
+
+```rust
+fn safe_wrapper(slice: &[u8], index: usize) -> u8 {
+    // SAFETY: The caller guarantees `index` is in bounds.
+    unsafe { *slice.get_unchecked(index) }
+}
+```
+
+Unsafe blocks are the logical *dual* to unsafe functions: where unsafe functions define proof obligations that callers must uphold, unsafe blocks state that those obligations have been satisfied.
+
+By default, the body of an `unsafe fn` is also treated as an unsafe block (implicit `unsafe {}`). This behavior can be changed by enabling the `unsafe_op_in_unsafe_fn` lint, which requires explicit `unsafe {}` blocks even inside `unsafe fn`.
+
+## Unsafe Functions
+
+Unsafe functions have preconditions that are part of their interface but cannot be verified by the type system. The function documents those conditions in its documentation, and callers must ensure they are met:
+
+```rust
+/// # Safety
+///
+/// - `ptr` must be a valid, aligned, non-null pointer to an initialized `i32`.
+/// - The memory at `ptr` must not be accessed concurrently.
+unsafe fn read_unchecked(ptr: *const i32) -> i32 {
+    *ptr
+}
+```
+
+<Warning>
+Calling an unsafe function without satisfying its documented preconditions is **undefined behavior**, even if the code compiles and appears to work on your machine.
+</Warning>
+
+## Unsafe Traits
+
+An unsafe trait has extra safety conditions that its implementations must uphold:
+
+```rust
+/// # Safety
+///
+/// Implementors must ensure that values of this type can be
+/// safely shared between threads without synchronization.
+unsafe trait ThreadSafeData {
+    fn get(&self) -> i32;
+}
+
+struct SafeData {
+    value: i32,
+}
+
+// SAFETY: `SafeData` contains only an `i32` which is `Copy` and has no
+// interior mutability, so it is safe to share between threads.
+unsafe impl ThreadSafeData for SafeData {
+    fn get(&self) -> i32 { self.value }
+}
+```
+
+## Building Safe Abstractions Over Unsafe Code
+
+The key principle of Rust's safety model is that `unsafe` code can be *encapsulated* in a safe API. The internal implementation may use unsafe operations, but the public API enforces the necessary invariants so that callers can use it safely:
+
+```rust
+pub struct SafeSliceWrapper<'a, T> {
+    data: &'a [T],
+    len: usize,
+}
+
+impl<'a, T> SafeSliceWrapper<'a, T> {
+    pub fn new(data: &'a [T]) -> Self {
+        SafeSliceWrapper { data, len: data.len() }
+    }
+
+    /// Returns the element at `index`, or `None` if out of bounds.
+    pub fn get(&self, index: usize) -> Option<&T> {
+        if index < self.len {
+            // SAFETY: We just verified that `index < self.len`, and `self.len`
+            // equals `self.data.len()`, so the index is in bounds.
+            Some(unsafe { self.data.get_unchecked(index) })
+        } else {
+            None
+        }
+    }
+}
+```
+
+The standard library is built extensively on this pattern. `Vec<T>`, `String`, `Mutex<T>`, and virtually all other standard types use `unsafe` code internally but present entirely safe public APIs.
+
+<Warning>
+`unsafe` code that allows safe code to trigger undefined behavior is called *unsound*. Soundness — the property that no combination of safe API calls can cause undefined behavior — is the fundamental obligation of any `unsafe` code author.
+</Warning>
+
+## Unsafe Operations Summary
+
+| Operation | Safe? | Requires |
+|-----------|-------|---------|
+| Dereference `*const T` or `*mut T` | ❌ | `unsafe {}` or `unsafe fn` |
+| Read/write `static mut` | ❌ | `unsafe {}` or `unsafe fn` |
+| Access union field | ❌ | `unsafe {}` or `unsafe fn` |
+| Call `unsafe fn` | ❌ | `unsafe {}` or `unsafe fn` |
+| Implement `unsafe trait` | ❌ | `unsafe impl` |
+| Declare `extern` block (2024+) | ❌ | `unsafe extern` |
+| Apply unsafe attribute | ❌ | `#[unsafe(attr)]` |
+| All other Rust operations | ✅ | Nothing extra |

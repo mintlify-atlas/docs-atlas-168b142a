@@ -1,0 +1,289 @@
+---
+title: "Structs, Enums, and Unions: Rust's Data Types"
+sidebarTitle: "Structs, Enums & Unions"
+description: "Defining Rust's named data types: struct fields, tuple structs, unit structs, enum variants, discriminants, union field access, and memory layout."
+---
+
+Rust provides three ways to define nominal data types: structs, enums, and unions. Structs group named or positional fields together, enums represent a value that is one of several variants, and unions provide C-style shared storage where all fields overlap in memory. Each declaration defines the type in the [type namespace] of the module or block where it is located.
+
+<Tabs>
+  <Tab title="Structs">
+
+## Structs
+
+A _struct_ is a nominal struct type defined with the keyword `struct`. Structs come in three forms: named-field structs, tuple structs, and unit structs.
+
+### Named-field structs
+
+Named-field structs have named fields, each with a declared type. Fields are accessed by name using dot notation:
+
+```rust
+struct Point { x: i32, y: i32 }
+
+let p = Point { x: 10, y: 11 };
+let px: i32 = p.x;
+```
+
+### Tuple structs
+
+A _tuple struct_ is a nominal [tuple type] also defined with `struct`. In addition to defining a type, it defines a constructor of the same name in the [value namespace]. The constructor is a function that creates a new instance:
+
+```rust
+struct Point(i32, i32);
+
+let p = Point(10, 11);
+let px: i32 = match p { Point(x, _) => x };
+```
+
+### Unit structs
+
+A _unit-like struct_ has no fields at all. It implicitly defines a constant of its type with the same name:
+
+```rust
+struct Cookie;
+let c = [Cookie, Cookie {}, Cookie, Cookie {}];
+```
+
+This is equivalent to:
+
+```rust
+struct Cookie {}
+const Cookie: Cookie = Cookie {};
+let c = [Cookie, Cookie {}, Cookie, Cookie {}];
+```
+
+### Memory layout
+
+The precise memory layout of a struct is not specified. One can specify a particular layout using the `repr` attribute. For example, `#[repr(C)]` gives the struct a layout compatible with C.
+
+  </Tab>
+  <Tab title="Enums">
+
+## Enumerations
+
+An _enumeration_ (or _enum_) is a simultaneous definition of a nominal enumerated type and a set of _constructors_ that can be used to create or pattern-match values of the corresponding type. Enumerations are declared with the keyword `enum`.
+
+### Variant kinds
+
+Enum constructors can have unit, tuple, or struct forms:
+
+```rust
+enum Animal {
+    Dog,                              // unit variant
+    Cat(String, f64),                 // tuple variant
+    Fish { name: String, fins: u32 }, // struct variant
+}
+
+let dog: Animal = Animal::Dog;
+let cat: Animal = Animal::Cat("Cocoa".to_string(), 37.2);
+let fish: Animal = Animal::Fish { name: "Nemo".to_string(), fins: 2 };
+```
+
+### Instantiating variants
+
+The different variant forms are instantiated in correspondingly different ways:
+
+```rust
+enum Examples {
+    UnitLike,
+    TupleLike(i32),
+    StructLike { value: i32 },
+}
+
+use Examples::*;
+let x = UnitLike;             // path expression
+let x = UnitLike {};          // struct expression
+let y = TupleLike(123);       // call expression
+let y = TupleLike { 0: 123 }; // struct expression with integer field names
+let z = StructLike { value: 123 };
+```
+
+### Discriminants
+
+Each enum instance has a _discriminant_: an integer logically associated with it that is used to determine which variant it holds.
+
+Enums without a primitive representation have discriminants of type `isize`. If a discriminant for a variant is not specified, it is set to one higher than the discriminant of the previous variant (starting at zero):
+
+```rust
+enum Foo {
+    Bar,            // 0
+    Baz = 123,      // 123
+    Quux,           // 124
+}
+
+let baz_discriminant = Foo::Baz as u32;
+assert_eq!(baz_discriminant, 123);
+```
+
+Explicit discriminants can be set on unit-only enums or enums with a primitive representation:
+
+```rust
+#[repr(u8)]
+enum Enum {
+    Unit = 3,
+    Tuple(u16),
+    Struct {
+        a: u8,
+        b: u16,
+    } = 1,
+}
+```
+
+<Warning>
+It is an error when two variants share the same discriminant. It is also an error to have an unspecified discriminant where the previous discriminant is the maximum value for the size of the discriminant.
+</Warning>
+
+### Accessing discriminants
+
+For unit-only enums, the discriminant can be directly accessed with a numeric cast:
+
+```rust
+enum Enum {
+    Foo,
+    Bar,
+    Baz,
+}
+
+assert_eq!(0, Enum::Foo as isize);
+assert_eq!(1, Enum::Bar as isize);
+assert_eq!(2, Enum::Baz as isize);
+```
+
+For enums with a primitive representation, the discriminant may be reliably accessed via unsafe pointer casting:
+
+```rust
+#[repr(u8)]
+enum Enum {
+    Unit,
+    Tuple(bool),
+    Struct { a: bool },
+}
+
+impl Enum {
+    fn discriminant(&self) -> u8 {
+        unsafe { *(self as *const Self as *const u8) }
+    }
+}
+```
+
+### Zero-variant enums
+
+Enums with zero variants are known as _zero-variant enums_. As they have no valid values, they cannot be instantiated:
+
+```rust
+enum ZeroVariants {}
+```
+
+Zero-variant enums are equivalent to the never type `!`, but they cannot be coerced into other types.
+
+  </Tab>
+  <Tab title="Unions">
+
+## Unions
+
+A union declaration uses the same syntax as a struct declaration, except with `union` in place of `struct`. The key property of unions is that all fields share common storage. Writes to one field of a union can overwrite its other fields, and the size of a union is determined by the size of its largest field.
+
+```rust
+#[repr(C)]
+union MyUnion {
+    f1: u32,
+    f2: f32,
+}
+```
+
+### Field restrictions
+
+Union field types are restricted to the following subset of types:
+
+- `Copy` types
+- References (`&T` and `&mut T` for arbitrary `T`)
+- `ManuallyDrop<T>` (for arbitrary `T`)
+- Tuples and arrays containing only allowed union field types
+
+This restriction ensures that union fields never need to be dropped.
+
+### Initialization
+
+A value of a union type is created using the same syntax as struct types, except that it must specify exactly one field:
+
+```rust
+# union MyUnion { f1: u32, f2: f32 }
+let u = MyUnion { f1: 1 };
+```
+
+### Reading and writing fields
+
+Writes to union fields are always safe, since they just overwrite arbitrary data. However, reads from union fields are unsafe — the programmer must ensure the data is valid at the field's type. Failing to do so results in undefined behavior:
+
+```rust
+# union MyUnion { f1: u32, f2: f32 }
+# let u = MyUnion { f1: 1 };
+let f = unsafe { u.f1 };
+```
+
+### Pattern matching
+
+Pattern matching on union fields uses the same syntax as struct patterns, except the pattern must specify exactly one field. Pattern matching, like a field read, requires an `unsafe` block:
+
+```rust
+# union MyUnion { f1: u32, f2: f32 }
+fn f(u: MyUnion) {
+    unsafe {
+        match u {
+            MyUnion { f1: 10 } => { println!("ten"); }
+            MyUnion { f2 } => { println!("{}", f2); }
+        }
+    }
+}
+```
+
+<Warning>
+The order in which subpatterns of a pattern are tested is not specified. A union field named in a pattern may be read even when the pattern as a whole does not match. Reading a union field is undefined behavior unless it holds a valid value of its type. When implementing a C-style tagged union, avoid matching the tag and the corresponding union field within a single pattern — match on the tag first, then read the union field within the matched arm.
+</Warning>
+
+### C-style tagged union example
+
+The recommended approach for implementing a C-style tagged union in safe Rust:
+
+```rust
+#[repr(u32)]
+enum Tag { I, F }
+
+#[repr(C)]
+union U {
+    i: i32,
+    f: f32,
+}
+
+#[repr(C)]
+struct Value {
+    tag: Tag,
+    u: U,
+}
+
+fn is_zero(v: Value) -> bool {
+    match v.tag {
+        Tag::I => unsafe { v.u.i == 0 },
+        Tag::F => unsafe { v.u.f == 0.0 },
+    }
+}
+```
+
+### Borrow rules
+
+Since union fields share common storage, borrowing one field borrows all of them for the same lifetime:
+
+```rust,compile_fail
+# union MyUnion { f1: u32, f2: f32 }
+fn test() {
+    let mut u = MyUnion { f1: 1 };
+    unsafe {
+        let b1 = &mut u.f1;
+        let b2 = &mut u.f2; // ERROR: cannot borrow `u` as mutable more than once
+        *b1 = 5;
+    }
+}
+```
+
+  </Tab>
+</Tabs>

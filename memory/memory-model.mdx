@@ -1,0 +1,146 @@
+---
+title: "Rust Memory Model: Values, Bytes, and Validity"
+sidebarTitle: "Memory Model"
+description: "An in-depth look at Rust's abstract memory model: bytes, provenance, initialization, validity invariants, allocated objects, and aliasing."
+---
+
+Rust's memory model defines how values are stored, accessed, and reasoned about by the compiler and programmer. Rather than mapping directly onto hardware bytes, Rust uses an *abstract* model that can distinguish properties invisible at the hardware level — such as whether memory is initialized and whether a byte carries pointer provenance. These distinctions directly affect whether your program has undefined behavior, even in cases where the underlying bits are identical at runtime.
+
+<Note>
+The memory model of Rust is **incomplete and not fully decided**. The information here describes the current state of the model; some details are still under active discussion in the Rust language and Unsafe Code Guidelines working groups.
+</Note>
+
+## Bytes
+
+The most basic unit of memory in Rust is a byte.
+
+<Note>
+While bytes are typically lowered to hardware bytes, Rust uses an "abstract" notion of bytes that can make distinctions which are absent in hardware, such as being uninitialized or storing part of a pointer. Those distinctions can affect whether your program has undefined behavior, so they still have tangible impact on how compiled Rust programs behave.
+</Note>
+
+Each byte in Rust's abstract machine may be one of the following:
+
+- **An initialized byte** — contains a `u8` value and optional *provenance* (see below).
+- **An uninitialized byte** — does not contain any meaningful value.
+
+<Note>
+The above list is not yet guaranteed to be exhaustive; additional kinds of bytes may be defined in future versions of the memory model.
+</Note>
+
+### Provenance
+
+Provenance is a property that certain bytes carry when they are derived from a pointer. It tracks the *allocation* that a pointer is associated with, enabling the compiler and abstract machine to check that pointer arithmetic and dereferences remain within the bounds of a valid object.
+
+Two pointers may have the same numeric address but different provenance — and those differences are meaningful. For example, a pointer derived from one allocation cannot validly access memory belonging to a different allocation, even if the numeric addresses happen to overlap.
+
+Provenance is used to define which memory accesses are legal. The standard library's [`std::ptr` module](https://doc.rust-lang.org/std/ptr/index.html#provenance) documents the provenance model used in Rust.
+
+## Allocated Objects
+
+Memory in Rust is divided into *allocated objects* (also called *allocations*). An allocation is a contiguous region of memory that has been set aside for a particular purpose — for example, the memory backing a `Box<T>`, a local variable on the stack, or a `static` item.
+
+Pointers and references are only valid within the allocation they were derived from. Crossing allocation boundaries — even if arithmetic would produce a valid address — is undefined behavior.
+
+Key properties of allocated objects:
+
+- Every live reference or `Box` must point into a single live allocation.
+- Pointer arithmetic (including field access and indexing) must stay within the bounds of the allocation.
+- An allocation begins as either initialized or uninitialized depending on how it was created (e.g., `Box::new` initializes, `MaybeUninit::uninit` does not).
+
+## Initialization
+
+Local variables in Rust are **not initialized when allocated**. At the start of a function, all local variables are in an uninitialized state. The compiler enforces through static analysis that local variables are initialized before they are read.
+
+```rust
+fn initialization_example() {
+    let init_after_if: ();
+    let uninit_after_if: ();
+
+    if some_condition() {
+        init_after_if = ();
+        uninit_after_if = ();
+    } else {
+        init_after_if = ();
+        // uninit_after_if is NOT initialized here
+    }
+
+    init_after_if; // ok: initialized on all paths
+    // uninit_after_if; // ERROR: use of possibly uninitialized variable
+}
+
+fn some_condition() -> bool { true }
+```
+
+Reading an uninitialized value is [undefined behavior](/unsafety/undefined-behavior) — it is not merely a runtime error. The compiler may assume initialized values, and incorrect use of `unsafe` code to bypass this check can corrupt the program's execution.
+
+## Validity Invariants
+
+Every type in Rust has a *validity invariant* — a set of conditions that a value of that type must always satisfy whenever it is "produced" (assigned, read, passed to or returned from a function). Violating a validity invariant is immediately undefined behavior.
+
+| Type | Validity requirement |
+|------|---------------------|
+| `bool` | Must be `false` (0) or `true` (1) |
+| `char` | Must be a valid Unicode scalar value (not a surrogate, ≤ `char::MAX`) |
+| `!` (never) | Must never exist |
+| Integer (`i*`/`u*`) | Must be initialized (not uninitialized bytes) |
+| Floating point (`f*`) | Must be initialized |
+| Raw pointer | Must be initialized |
+| Reference (`&T`, `&mut T`) | Must be aligned, non-null, non-dangling, and point to a valid value |
+| `Box<T>` | Same requirements as `&mut T` |
+| `enum` | Must have a valid discriminant; active variant fields must be valid |
+| `fn` pointer | Must be non-null |
+
+<Warning>
+Producing an invalid value — even in an `unsafe` block — is **immediately undefined behavior**. The compiler is permitted to assume validity invariants hold and will optimize accordingly.
+</Warning>
+
+## Interior vs. External Mutability
+
+Rust distinguishes between two kinds of mutation:
+
+**External mutability** is expressed through `&mut T` references. Shared (`&T`) references guarantee that the data they point to will not be mutated through any path that the compiler can observe. This guarantee enables important optimizations: the compiler can cache a `&T` value in a register across code that does not reborrow it.
+
+**Interior mutability** allows mutation through shared references using types like `UnsafeCell<T>`. The compiler recognizes `UnsafeCell<T>` as the special primitive underlying all interior-mutable types (such as `Cell<T>`, `RefCell<T>`, `Mutex<T>`, and `Atomic*` types). Data inside an `UnsafeCell` may be mutated even through a shared reference, but only using the API of `UnsafeCell` itself.
+
+```rust
+use std::cell::Cell;
+
+let x = Cell::new(42u32);
+// x is shared (&Cell<u32>) but its value can be changed:
+x.set(100);
+println!("{}", x.get()); // 100
+```
+
+<Note>
+The aliasing rules for `&T` explicitly carve out an exception for data inside `UnsafeCell<U>`: a shared reference to such data does not prevent mutation of the `UnsafeCell`-wrapped bytes.
+</Note>
+
+## Aliasing Rules
+
+Rust's ownership and borrowing system enforces aliasing rules that are more restrictive than C or C++:
+
+- `&T` must point to memory that is not mutated while the reference is live (except for bytes inside `UnsafeCell`).
+- `&mut T` must point to memory that is not read or written by any pointer not derived from it, and no other reference may point to the same memory while the `&mut T` is live.
+- `Box<T>` is treated similarly to `&'static mut T` for aliasing purposes.
+
+These rules apply to **all** references and `Box<T>`, including those stored in private fields of structs.
+
+<Warning>
+Violating these aliasing rules is undefined behavior. Miri (the Rust UB detector) uses the Stacked Borrows or Tree Borrows model to dynamically check these rules at runtime during testing.
+</Warning>
+
+## Memory Allocation and Lifetime
+
+Programs items such as functions, modules, and types have their value calculated at compile time and stored uniquely in the memory image of the Rust process. Items are neither dynamically allocated nor freed.
+
+The *heap* is a general term that describes boxes — values managed via `Box<T>` and similar constructs. The lifetime of a heap allocation depends on the lifetime of the box value pointing to it. Because box values may be moved in and out of stack frames or stored on the heap themselves, heap allocations may outlive the frame they were allocated within.
+
+An allocation in the heap is guaranteed to reside at a single location in memory for its entire lifetime — it will never be relocated as a result of moving the box value.
+
+```rust
+// Stack allocation: lives for the duration of this scope
+let stack_val: i32 = 42;
+
+// Heap allocation: lives until the Box is dropped
+let heap_val: Box<i32> = Box::new(99);
+```

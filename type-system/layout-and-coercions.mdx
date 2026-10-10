@@ -1,0 +1,261 @@
+---
+title: "Type Layout, Alignment, and Coercions in Rust"
+sidebarTitle: "Layout & Coercions"
+description: "Reference for Rust type layout, alignment, repr attributes (C, transparent, packed, align), DST layout, type coercions, and coercion sites with examples."
+---
+
+Understanding how Rust lays out values in memory is essential for writing unsafe code, interoperating with C, and reasoning about performance. This page covers size and alignment rules, the `repr` attribute options, dynamically sized types, and the type coercions that the compiler performs automatically.
+
+---
+
+## Size and Alignment
+
+Every value in Rust has two layout properties:
+
+- **Alignment**: The alignment of a value specifies which addresses are valid for storing it. A value of alignment `n` must be stored at an address that is a multiple of `n`. Alignment is measured in bytes, is always at least 1, and is always a power of 2. The alignment of a value can be checked with `std::mem::align_of_val`.
+- **Size**: The size of a value is the offset in bytes between successive elements in an array with that item type, including alignment padding. Size is always a multiple of alignment. The size of a value can be checked with `std::mem::size_of_val`.
+
+Types where all values share the same size and alignment implement the `Sized` trait. Types that are not `Sized` are [dynamically sized types (DSTs)](#dynamically-sized-types).
+
+### Primitive Type Sizes
+
+| Type              | `size_of::<Type>()` |
+|-------------------|---------------------|
+| `bool`            | 1                   |
+| `u8` / `i8`       | 1                   |
+| `u16` / `i16`     | 2                   |
+| `u32` / `i32`     | 4                   |
+| `u64` / `i64`     | 8                   |
+| `u128` / `i128`   | 16                  |
+| `usize` / `isize` | platform-dependent  |
+| `f32`             | 4                   |
+| `f64`             | 8                   |
+| `char`            | 4                   |
+
+`usize` and `isize` have a size big enough to contain every address on the target platform (4 bytes on 32-bit, 8 bytes on 64-bit). Alignment of primitives is platform-specific; in most cases it equals their size, but may be less. For example, `i128` and `u128` are often aligned to 4 or 8 bytes even though their size is 16.
+
+### Pointer and Reference Layout
+
+Pointers and references have the same layout regardless of mutability. Pointers to `Sized` types have the same size and alignment as `usize`. Pointers to unsized types (DSTs) are *fat pointers* that are larger — currently twice the size of `usize` — because they carry extra metadata:
+
+- Pointers to `[T]` and `str` carry the length in elements/bytes.
+- Pointers to trait objects carry a pointer to the vtable.
+- Pointers to a struct with an unsized tail carry the same metadata as a pointer to that tail.
+
+---
+
+## `repr` Representations
+
+All user-defined composite types have a *representation* that determines their memory layout. The representation is set with the `repr` attribute.
+
+| Representation | Attribute | Applies To | Description |
+|----------------|-----------|------------|-------------|
+| Rust (default) | `#[repr(Rust)]` or none | structs, enums, unions | Compiler may reorder fields for optimization |
+| C              | `#[repr(C)]` | structs, unions, enums | C-compatible layout |
+| Transparent    | `#[repr(transparent)]` | structs/enums with one field | Same layout as the single field |
+| Primitive      | `#[repr(u8)]`, `#[repr(i32)]`, etc. | enums | Fixed-size discriminant |
+| Packed         | `#[repr(packed)]` or `#[repr(packed(n))]` | structs, unions | Minimize inter-field padding |
+| Aligned        | `#[repr(align(n))]` | structs, unions, enums | Raise minimum alignment |
+
+### The `Rust` Representation (Default)
+
+The default representation makes no guarantees about field ordering or padding beyond soundness requirements:
+
+1. The offset of a field is divisible by that field's alignment.
+2. The alignment of the type is at least the maximum alignment of its fields.
+3. Fields do not overlap.
+
+The compiler may reorder fields to minimize padding.
+
+```rust
+struct Foo {
+    a: u8,
+    b: u32,
+    c: u16,
+}
+// The compiler may reorder fields to: b (4B), c (2B), a (1B) + 1B padding
+```
+
+### The `C` Representation
+
+The `C` representation produces a layout compatible with the equivalent C struct. Fields are laid out in declaration order with C-standard padding rules:
+
+```rust
+#[repr(C)]
+struct ThreeInts {
+    first: i16,
+    second: i8,
+    third: i32
+}
+```
+
+The size and offset algorithm for `#[repr(C)]` structs:
+1. Start with offset 0.
+2. For each field in declaration order: pad the current offset to the field's alignment, record the field offset, advance by the field's size.
+3. Round the total size up to the struct's alignment.
+
+`#[repr(C)]` unions have the size of the largest field rounded to alignment, with every field at offset 0.
+
+### The `transparent` Representation
+
+`#[repr(transparent)]` can only be used on a struct or single-variant enum that has at most one non-zero-sized field (plus any number of zero-sized, 1-aligned fields such as `PhantomData`). The type has exactly the same layout and ABI as its single field:
+
+```rust
+#[repr(transparent)]
+struct Wrapper(u32);
+
+// Wrapper has the same size, alignment, and ABI as u32
+```
+
+This is commonly used for newtype wrappers in FFI.
+
+### Alignment Modifiers: `align` and `packed`
+
+The `align` and `packed` modifiers raise or lower the alignment of structs and unions:
+
+```rust
+// Default representation, alignment lowered to 2 bytes
+#[repr(packed(2))]
+struct PackedStruct {
+    first: i16,
+    second: i8,
+    third: i32
+}
+
+// C representation, alignment raised to 8 bytes
+#[repr(C, align(8))]
+struct AlignedStruct {
+    first: i16,
+    second: i8,
+    third: i32
+}
+```
+
+- `align(n)`: Raises the minimum alignment to `n` bytes (must be a power of 2 from 1 to 2²⁹).
+- `packed` / `packed(n)`: Lowers the maximum field alignment, eliminating inter-field padding. If no value is given, the alignment is 1 (no padding at all).
+
+<Warning>
+`align` and `packed` cannot both be applied to the same type. A `packed` type cannot transitively contain an `align`ed type. References to unaligned fields are undefined behavior — use `ptr::read_unaligned` / `ptr::write_unaligned` instead.
+</Warning>
+
+---
+
+## Dynamically Sized Types
+
+Most types have a fixed size known at compile time and implement `Sized`. A *dynamically sized type (DST)*, also called an unsized type, has a size known only at runtime. The DSTs in Rust are:
+
+- `[T]` — slices: the length is stored in the fat pointer.
+- `str` — UTF-8 string slices: the byte length is stored in the fat pointer.
+- `dyn Trait` — trait objects: the vtable pointer is stored in the fat pointer.
+- Any struct or tuple whose last field is a DST.
+
+DSTs can only be used in certain positions:
+
+- Behind pointer types (`&T`, `&mut T`, `*const T`, `*mut T`, `Box<T>`).
+- As type arguments with a `?Sized` bound.
+- As the `Self` type in trait definitions (where `Self: ?Sized` is the default).
+- As the last field of a struct.
+
+```rust
+// A struct with a DST tail is itself a DST
+struct MyStr {
+    header: u32,
+    data: str,  // DST tail
+}
+```
+
+<Note>
+Variables, function parameters, `const` items, and `static` items must be `Sized`. You cannot have a bare `str` or `[T]` as a local variable.
+</Note>
+
+---
+
+## Type Coercions
+
+Type coercions are implicit type conversions that happen automatically at specific locations in the program. Any coercion can also be performed explicitly with the `as` cast operator.
+
+### Coercion Sites
+
+Coercions occur at *coercion sites* — places where the target type is known:
+
+- `let` statements with an explicit type annotation: `let _: &i8 = &mut 42;`
+- `static` and `const` item declarations.
+- Function call arguments.
+- Struct, union, or enum variant field initializers.
+- Function return values (including `return` expressions and final block expressions).
+- Assignment expression right-hand sides.
+
+### Coercion Types
+
+The following coercions are permitted:
+
+| From | To | Notes |
+|------|-----|-------|
+| `&mut T` | `&T` | Reborrow as shared |
+| `*mut T` | `*const T` | Drop mutability |
+| `&T` | `*const T` | Reference to raw pointer |
+| `&mut T` | `*mut T` | Mutable reference to raw pointer |
+| `&T` or `&mut T` | `&U` | If `T: Deref<Target = U>` (deref coercion) |
+| `&mut T` | `&mut U` | If `T: DerefMut<Target = U>` |
+| Function item | `fn` pointer | Same signature |
+| Non-capturing closure | `fn` pointer | Same signature |
+| `!` | any `T` | Never type coerces to anything |
+
+### Deref Coercions
+
+Deref coercions are the most common coercions in practice. They automatically dereference through `Deref` implementations:
+
+```rust
+use std::ops::Deref;
+
+struct CharContainer {
+    value: char,
+}
+
+impl Deref for CharContainer {
+    type Target = char;
+
+    fn deref<'a>(&'a self) -> &'a char {
+        &self.value
+    }
+}
+
+fn foo(arg: &char) {}
+
+fn main() {
+    let x = &mut CharContainer { value: 'y' };
+    foo(x); // &mut CharContainer is coerced to &char via Deref
+}
+```
+
+Common deref coercions include:
+- `&String` → `&str`
+- `&Vec<T>` → `&[T]`
+- `&Box<T>` → `&T`
+
+### Unsized Coercions
+
+*Unsized coercions* convert sized types to DSTs:
+
+- `[T; n]` to `[T]` — array to slice.
+- `T` to `dyn U` — concrete type to trait object, when `T: U + Sized` and `U` is dyn compatible.
+- `dyn T` to `dyn U` — trait object upcast, when `U` is a supertrait of `T`.
+- `Foo<..., T, ...>` to `Foo<..., U, ...>` — struct coercion, when the last field's type coerces from `T` to `U`.
+
+These coercions widen a thin pointer to a fat pointer that includes the metadata needed for the DST:
+
+```rust
+let array: [i32; 3] = [1, 2, 3];
+let slice: &[i32] = &array;  // unsized coercion: [i32; 3] -> [i32]
+
+trait Animal { fn sound(&self) -> &str; }
+struct Dog;
+impl Animal for Dog { fn sound(&self) -> &str { "woof" } }
+
+let dog = Dog;
+let animal: &dyn Animal = &dog;  // unsized coercion: Dog -> dyn Animal
+```
+
+### Least Upper Bound Coercions
+
+In some contexts (multiple `if` branches, `match` arms, array elements), the compiler finds the least upper bound of a set of types by coercing them toward a common type. For example, all branches of an `if`/`else` must have the same type, but the compiler can coerce them to a common supertype.

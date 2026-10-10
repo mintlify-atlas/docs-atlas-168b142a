@@ -1,0 +1,205 @@
+---
+title: "Expressions and Statements in Rust: Core Evaluation Rules"
+sidebarTitle: "Overview"
+description: "Master Rust's expression-oriented model: statements, let bindings, place vs value expressions, evaluation order, and temporary lifetimes."
+---
+
+Rust is primarily an *expression language*. Almost every form of value-producing or effect-causing evaluation is expressed through expressions, and most expressions can nest within each other. Statements serve mostly to contain and explicitly sequence expression evaluation — they are the scaffolding around expressions rather than the primary building block.
+
+## Statements
+
+A *statement* is a component of a block, which is itself a component of an outer expression or function. Rust has two kinds of statement: **declaration statements** and **expression statements**.
+
+### Item Declarations
+
+An *item declaration statement* has the same syntactic form as an item declaration within a module. Declaring an item inside a statement block restricts its scope to that block, and the item is not given a canonical path.
+
+```rust
+fn outer() {
+    let outer_var = true;
+
+    fn inner() { /* outer_var is not in scope here */ }
+
+    inner();
+}
+```
+
+<Note>
+  There is no implicit capture of the containing function's generic parameters, parameters, or local variables by items declared inside blocks.
+</Note>
+
+### `let` Statements
+
+A `let` statement introduces a new set of variables given by a pattern. The pattern may optionally be followed by a type annotation and an initializer expression, and optionally an `else` block.
+
+```rust
+let (mut v, w) = (vec![1, 2, 3], 42); // bindings may be mut or const
+
+let Some(t) = v.pop() else {  // refutable patterns require an else block
+    panic!();                 // the else block must diverge
+};
+
+let [u, v] = [v[0], v[1]] else {
+    panic!();
+};
+```
+
+Key rules for `let` statements:
+- When no type annotation is given, the compiler infers the type.
+- Variables are visible from the point of declaration until the end of the enclosing block.
+- If an `else` block is not present, the pattern must be **irrefutable**.
+- If an `else` block is present, the pattern may be **refutable**, but the `else` block must always diverge (evaluate to the [never type][`!`]).
+
+### Expression Statements
+
+An *expression statement* evaluates an expression and ignores its result. Its purpose is to trigger the effects of the expression.
+
+```rust
+let mut v = vec![1, 2, 3];
+v.pop();          // ignore the element returned from pop
+if v.is_empty() {
+    v.push(5);
+} else {
+    v.remove(0);
+}                 // semicolon can be omitted for block/control-flow expressions
+[1];              // separate expression statement, not an indexing expression
+```
+
+Block expressions and control flow expressions used as statements may omit the trailing semicolon. However, when the trailing semicolon is omitted, the result must be type `()`:
+
+```rust
+// error: the block's type is i32, not ()
+// if true { 1 }
+
+// ok: the block's type is i32 — semicolon discards the value
+if true { 1 } else { 2 };
+```
+
+<Warning>
+  The type of `ExpressionWithBlock` expressions used as statements must be the unit type `()` unless followed immediately by a semicolon.
+</Warning>
+
+## Expressions
+
+An expression always *produces a value* and may have *effects* (side effects) during evaluation. Many expressions contain sub-expressions called *operands*. The structure of expressions dictates the structure of execution: blocks, statements, and expressions can nest inside each other to arbitrary depth.
+
+### Expression Precedence
+
+The following table lists Rust operator/expression precedence from strong (top) to weak (bottom). Binary operators at the same level group according to their associativity.
+
+| Operator/Expression | Associativity |
+|---------------------|---------------|
+| Paths | |
+| Method calls | |
+| Field expressions | left to right |
+| Function calls, array indexing | |
+| `?` | |
+| Unary `-` `!` `*` borrow | |
+| `as` | left to right |
+| `*` `/` `%` | left to right |
+| `+` `-` | left to right |
+| `<<` `>>` | left to right |
+| `&` | left to right |
+| `^` | left to right |
+| `\|` | left to right |
+| `==` `!=` `<` `>` `<=` `>=` | Require parentheses |
+| `&&` | left to right |
+| `\|\|` | left to right |
+| `..` `..=` | Require parentheses |
+| `=` `+=` `-=` `*=` `/=` `%=` `&=` `\|=` `^=` `<<=` `>>=` | right to left |
+| `return` `break` closures | |
+
+### Evaluation Order of Operands
+
+Most expressions evaluate their operands **left to right** as written in the source code, and evaluate operands **before** applying the expression's effect. For example, the two `next` calls below are always called in the same left-to-right order:
+
+```rust
+let mut one_two = vec![1, 2].into_iter();
+assert_eq!(
+    (1, 2),
+    (one_two.next().unwrap(), one_two.next().unwrap())
+);
+```
+
+Expressions that evaluate operands in this standard left-to-right order include: dereference, error propagation, negation, arithmetic/logical binary operators, comparison operators, type cast, grouped, array, await, index, tuple, tuple index, struct, call, method call, field, break, range, and return expressions.
+
+<Note>
+  Since this applies recursively, expressions are also evaluated from innermost to outermost — inner subexpressions are fully evaluated before their enclosing expression.
+</Note>
+
+## Place Expressions and Value Expressions
+
+Expressions are divided into two main categories:
+
+- A **place expression** represents a memory location. These are: paths referring to local or static variables, dereferences (`*expr`), array indexing (`expr[expr]`), field references (`expr.f`), and parenthesized place expressions.
+- A **value expression** represents an actual value. All other expressions are value expressions.
+
+<Note>
+  Historically, place expressions were called *lvalues* and value expressions were called *rvalues*.
+</Note>
+
+The following contexts are *place expression contexts*:
+- The left operand of a compound assignment expression
+- The operand of a unary borrow, raw borrow, or dereference operator
+- The operand of a field expression
+- The indexed operand of an array indexing expression
+- The tuple operand of a tuple indexing expression
+- The operand of any implicit borrow
+- The initializer of a `let` statement
+- The scrutinee of an `if let`, `match`, or `while let` expression
+- The base of a functional update struct expression
+
+### Moved and Copied Types
+
+When a place expression is evaluated in a value expression context (or is bound by value in a pattern), it denotes the value *held in* that memory location:
+
+- If the value's type implements `Copy`, it is copied.
+- If the type is `Sized`, it may be possible to move the value.
+
+Only the following place expressions may be moved out of:
+- Variables that are not currently borrowed
+- Temporary values
+- Fields of a movable place expression that don't implement `Drop`
+- The result of dereferencing a `Box<T>` expression that can also be moved out of
+
+After moving out of a local variable, that location is **deinitialized** and cannot be read again until reinitialized.
+
+### Mutability
+
+For a place expression to be assigned to, mutably borrowed, implicitly mutably borrowed, or bound with `ref mut`, it must be *mutable*. Mutable place expression contexts include:
+
+- Mutable variables not currently borrowed
+- Mutable `static` items
+- Temporary values
+- Fields (evaluates the sub-expression in a mutable place expression context)
+- Dereferences of `*mut T` pointers
+- Dereferences of `&mut T` variables or fields
+- Dereferences of types that implement `DerefMut`
+- Array indexing of types that implement `IndexMut`
+
+### Temporaries
+
+When using a value expression in most place expression contexts, a temporary unnamed memory location is created and initialized to that value. The expression evaluates to that location (unless promoted to a `static`). The drop scope of the temporary is usually the end of the enclosing statement.
+
+## The Unit Type `()`
+
+Many expressions and statements produce the unit value `()` — the zero-element tuple. Expression statements discard their result, effectively producing `()`. Assignment expressions, compound assignment expressions, `while` loops, and `for` loops all evaluate to `()`.
+
+```rust
+let x: () = {};          // empty block has unit type
+let y: () = { 0u8; };   // block with final semicolon has unit type
+```
+
+## Implicit Borrows
+
+Certain expressions treat an expression as a place expression by implicitly borrowing it. For example, the `==` operator implicitly borrows its operands:
+
+```rust
+let a: &[i32] = &[1, 2, 3];
+let b: &[i32] = &[1, 2, 3];
+// Equivalent:
+*a == *b;
+::std::cmp::PartialEq::eq(&*a, &*b);
+```
+
+Implicit borrows occur in: left operand of method-call expressions, left operand of field expressions, left operand of call expressions, left operand of array indexing expressions, operand of the dereference operator, operands of comparison operators, left operands of compound assignment, and arguments to `format_args!` except the format string.

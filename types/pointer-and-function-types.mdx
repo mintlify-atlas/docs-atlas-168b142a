@@ -1,0 +1,242 @@
+---
+title: "Pointer and Function Types in Rust"
+sidebarTitle: "Pointer & Function Types"
+description: "Reference for Rust pointer types (shared/mutable references, raw pointers), function item types, function pointer types, and closure types with Fn traits."
+---
+
+All pointers in Rust are explicit, first-class values. They can be moved or copied, stored in data structures, and returned from functions. This page covers shared and mutable references, raw pointers, function item types, function pointer types, and closure types.
+
+---
+
+## References (`&T` and `&mut T`)
+
+### Shared References (`&T`)
+
+A shared reference points to memory owned by some other value. Shared references are written as `&T` or `&'a T` when an explicit lifetime is needed. Any number of shared references to a value may exist simultaneously.
+
+When a shared reference is created, it prevents direct mutation of the referenced value. The only exception is types with [interior mutability](/type-system/special-types-and-traits#unsafecellt).
+
+Copying a shared reference is a shallow operation that only copies the pointer itself — shared references implement `Copy`. Releasing (dropping) a reference has no effect on the value it points to.
+
+```rust
+let x: i32 = 42;
+let r1: &i32 = &x;
+let r2: &i32 = r1;  // Copy: both r1 and r2 are valid
+println!("{} {}", r1, r2);
+```
+
+Shared references are **covariant** over both their lifetime and `T`.
+
+### Mutable References (`&mut T`)
+
+A mutable reference points to memory owned by some other value. A mutable reference that has not been re-borrowed is the only way to access the value it points to — this exclusivity guarantees that mutation is safe. Mutable references are **not** `Copy`.
+
+```rust
+let mut x: i32 = 42;
+let r: &mut i32 = &mut x;
+*r += 1;
+println!("{}", x); // 43
+```
+
+Mutable references are **invariant** over `T` (but covariant over their lifetime).
+
+<Note>
+Pointers and references have the same layout. Mutability does not change the size or alignment of a reference. Pointers to sized types have the same size and alignment as `usize`.
+</Note>
+
+---
+
+## Raw Pointers (`*const T` and `*mut T`)
+
+Raw pointers are pointers without safety or liveness guarantees. They are written as `*const T` or `*mut T`. Unlike references, raw pointers:
+
+- May be null or dangling.
+- Do not enforce aliasing rules.
+- Do not have an associated lifetime.
+
+```rust
+let x: i32 = 42;
+let raw: *const i32 = &x;
+
+// Dereferencing a raw pointer requires `unsafe`
+let val = unsafe { *raw };
+println!("{}", val);
+```
+
+Raw pointers can be created from references using `&raw const` and `&raw mut`:
+
+```rust
+let mut x: i32 = 10;
+let p: *const i32 = &raw const x;
+let pm: *mut i32 = &raw mut x;
+```
+
+<Warning>
+Dereferencing a raw pointer is an `unsafe` operation. Raw pointers may point to invalid memory, be null, or violate aliasing rules that the compiler assumes hold for references.
+</Warning>
+
+Copying or dropping a raw pointer has no effect on the lifecycle of any other value. When comparing raw pointers, they are compared by address rather than by what they point to. For raw pointers to dynamically sized types, the additional metadata is also compared.
+
+`*mut T` to `*const T` coercion is allowed, as is `&T` to `*const T` and `&mut T` to `*mut T`.
+
+Raw pointers are **covariant** over `T` for `*const T` and **invariant** over `T` for `*mut T`.
+
+---
+
+## Function Item Types
+
+When you refer to a function by name, you get a value of its *function item type*. Function item types are zero-sized — they carry no runtime data, only a compile-time identity for a specific function (including its type arguments and early-bound lifetime arguments).
+
+```rust
+fn add(x: i32, y: i32) -> i32 { x + y }
+
+let f = add;  // f has a unique function item type
+```
+
+Because each function item type uniquely identifies the function, the types of different functions are distinct even if their signatures are the same:
+
+```rust,compile_fail
+fn foo<T>() { }
+let x = &mut foo::<i32>;
+*x = foo::<u32>; //~ ERROR mismatched types
+```
+
+The compiler displays function item types as something like `fn(u32) -> i32 {fn_name}` in error messages — there is no syntax to write a function item type directly.
+
+All function items implement `Copy`, `Clone`, `Send`, and `Sync`. They also implement `Fn`, `FnMut`, and `FnOnce` unless the function has an `unsafe` qualifier, a `target_feature` attribute, or a non-`"Rust"` ABI.
+
+---
+
+## Function Pointer Types
+
+A function pointer type, written using the `fn` keyword, refers to a function whose identity may not be known at compile time. Unlike function item types, function pointers have the size of a pointer.
+
+```rust
+fn add(x: i32, y: i32) -> i32 {
+    x + y
+}
+
+let mut x = add(5, 7);
+
+type Binop = fn(i32, i32) -> i32;
+let bo: Binop = add;  // coercion from function item to function pointer
+x = bo(5, 7);
+```
+
+### Safe vs Unsafe Function Pointers
+
+The `unsafe` qualifier indicates that calling the function pointer requires an `unsafe` block:
+
+```rust
+unsafe fn dangerous() {}
+let fp: unsafe fn() = dangerous;
+unsafe { fp(); }
+```
+
+### Calling Conventions (`extern`)
+
+The `extern` qualifier specifies the calling convention:
+
+```rust
+// C calling convention
+let c_fn: extern "C" fn(i32) -> i32;
+
+// Default Rust calling convention (no extern needed)
+let rust_fn: fn(i32) -> i32;
+```
+
+### Coercions to Function Pointers
+
+Function item types and non-capturing, non-async closures can be coerced to function pointers with the matching signature:
+
+```rust
+// Function item coerced to fn pointer
+let foo_ptr_1: fn() = || {};
+
+// Different function items coerced to the same fn pointer type in a match
+# let want_i32 = false;
+# fn foo<T>() { }
+let foo_ptr_2 = if want_i32 {
+    foo::<i32>
+} else {
+    foo::<u32>
+};
+// foo_ptr_2 has type fn()
+```
+
+All function pointers implement `Copy`, `Clone`, `Send`, `Sync`, `Fn`, `FnMut`, and `FnOnce`.
+
+---
+
+## Closure Types
+
+A closure expression produces a value with a unique, anonymous type that cannot be written out. A closure type is approximately equivalent to a struct containing the captured values from the environment.
+
+```rust
+let x = 5;
+let add_x = |n| n + x;  // captures `x` by immutable borrow
+println!("{}", add_x(3)); // 8
+```
+
+### Capture Modes
+
+The compiler selects the least restrictive capture mode compatible with how the captured value is used inside the closure:
+
+1. **Immutable borrow (`ImmBorrow`)** — the place is captured as a shared reference.
+2. **Unique immutable borrow (`UniqueImmBorrow`)** — a unique shared reference (used when modifying through a mutable reference).
+3. **Mutable borrow (`MutBorrow`)** — the place is captured as a mutable reference.
+4. **Move (`ByValue`)** — the value is moved into the closure.
+
+The `move` keyword forces all captures to be by move (or by copy for `Copy` types):
+
+```rust
+let s = String::from("hello");
+let owns_s = move || println!("{}", s); // s is moved into the closure
+// s is no longer accessible here
+owns_s();
+```
+
+### `Fn`, `FnMut`, and `FnOnce`
+
+Every closure type implements `FnOnce`. Closures also implement more specific traits depending on what they do with captured values:
+
+- **`FnOnce`** — the closure can be called once by consuming ownership of the closure.
+- **`FnMut`** — the closure does not move out of any captured variables; it can be called by mutable reference.
+- **`Fn`** — the closure does not mutate or move out of any captured variables; it can be called by shared reference.
+
+```rust
+fn call_fn<F: Fn(i32) -> i32>(f: F, x: i32) -> i32 {
+    f(x)
+}
+
+fn call_fn_mut<F: FnMut(i32) -> i32>(mut f: F, x: i32) -> i32 {
+    f(x)
+}
+
+fn call_fn_once<F: FnOnce(i32) -> i32>(f: F, x: i32) -> i32 {
+    f(x)
+}
+
+let add_one = |x| x + 1;           // implements Fn, FnMut, FnOnce
+let mut count = 0;
+let mut counter = || { count += 1; count }; // implements FnMut, FnOnce
+```
+
+<Note>
+`move` closures may still implement `Fn` or `FnMut` even though they capture by move. The trait implemented is determined by what the closure *does* with captured values, not *how* it captures them.
+</Note>
+
+### Coercion to Function Pointers
+
+Non-capturing, non-async closures can be coerced to function pointer types (`fn(T) -> U`) with the matching signature:
+
+```rust
+let add = |x: i32, y: i32| x + y;
+
+type Binop = fn(i32, i32) -> i32;
+let bo: Binop = add;  // coercion from non-capturing closure to fn pointer
+```
+
+### Auto Trait Implementations for Closures
+
+Closure types implement `Clone` and `Copy` if they do not capture any values by unique immutable or mutable reference, and all values captured by copy or move are `Clone` or `Copy` respectively. They implement `Sync` if all captured values are `Sync`, and `Send` according to rules similar to those for struct types.

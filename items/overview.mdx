@@ -1,0 +1,144 @@
+---
+title: "Items in Rust: Top-Level Language Constructs"
+sidebarTitle: "Overview"
+description: "An overview of Rust items — the named, compile-time constructs that form the building blocks of every crate, module, and program."
+---
+
+Items are the fundamental building blocks of a Rust program. Every piece of named, reusable functionality you write in Rust — functions, structs, traits, constants, and more — is an item. Items are organized within a crate by a nested set of modules, and every crate has a single outermost anonymous module that contains all further items. Items are entirely determined at compile-time, generally remain fixed during execution, and may reside in read-only memory.
+
+## What is an item?
+
+An _item_ is a component of a crate. Each item has a canonical [path] within the module tree of the crate, determined by where it is declared. Items may be defined in any order within a module or block — name resolution allows items to be referenced before or after where they are defined, with the exception of `macro_rules!`, which has its own scoping behavior.
+
+```rust
+// Items can reference each other regardless of declaration order
+fn greet() -> String {
+    format!("Hello, {}!", name())
+}
+
+fn name() -> &'static str {
+    "Rust"
+}
+```
+
+## Item kinds
+
+Rust defines the following kinds of items, each with a dedicated syntax and semantics:
+
+| Item | Description |
+|------|-------------|
+| `mod` | A module that groups items together |
+| `extern crate` | A dependency on an external crate |
+| `use` | A path shorthand / name import |
+| `fn` | A function definition |
+| `type` | A type alias |
+| `struct` | A named struct type |
+| `enum` | An enumeration type with variants |
+| `union` | A C-like union type |
+| `const` | A compile-time constant value |
+| `static` | A single static memory allocation |
+| `trait` | An abstract interface definition |
+| `impl` | An implementation block (inherent or trait) |
+| `extern` block | An FFI block declaring foreign items |
+
+Items may optionally be preceded by outer attributes and a visibility qualifier.
+
+## Where items can appear
+
+Items may be declared in the [root of the crate], inside a [module], or inside a [block expression]. This means you can define items inside function bodies, though their scope is limited to that block.
+
+```rust
+fn example() {
+    // Items can be defined inside function bodies
+    struct Local {
+        value: i32,
+    }
+    const MAX: i32 = 100;
+
+    let x = Local { value: MAX };
+    println!("{}", x.value);
+}
+```
+
+<Note>
+Items declared inside a function body are scoped to that block. They are not visible outside of it, but they behave like ordinary items within — they can reference each other and are fully type-checked at compile time.
+</Note>
+
+## Free items vs associated items
+
+Most items are _free items_ — they are declared directly in a module or block and are not attached to any particular type. A subset of items, called **associated items**, may only be declared inside [traits] and [implementations]. Associated items include:
+
+- Associated functions (and methods)
+- Associated types
+- Associated constants
+
+Associated items are intrinsically related to the type they are declared on. For example, the `len` method is an associated function of `Vec<T>`, and `Iterator::Item` is an associated type of the `Iterator` trait.
+
+```rust
+trait Summary {
+    // Associated constant (with default)
+    const MAX_LENGTH: usize = 256;
+
+    // Associated type
+    type Output;
+
+    // Associated function (method)
+    fn summarize(&self) -> Self::Output;
+}
+```
+
+Additionally, a subset of items called **external items** — functions and statics — may be declared inside `extern` blocks for use in FFI.
+
+## Visibility
+
+By default, all items are private to the module in which they are declared. Items can be made accessible to other modules using the `pub` keyword and its variants:
+
+- `pub` — visible to everyone
+- `pub(crate)` — visible within the current crate
+- `pub(super)` — visible to the parent module
+- `pub(in path)` — visible within a specific ancestor module
+
+```rust
+pub mod geometry {
+    pub struct Point {
+        pub x: f64,
+        pub y: f64,
+    }
+
+    pub(crate) fn distance(a: &Point, b: &Point) -> f64 {
+        let dx = a.x - b.x;
+        let dy = a.y - b.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+}
+```
+
+<Tip>
+Associated items in a `pub` trait are public by default, and enum variants in a `pub` enum are also public by default.
+</Tip>
+
+## Explore each item kind
+
+<CardGroup cols={2}>
+  <Card title="Modules & Crates" href="/items/modules-and-crates">
+    Organizing code with `mod`, crate types, the module tree, and `extern crate`.
+  </Card>
+  <Card title="Functions" href="/items/functions">
+    Function syntax, parameters, return types, `const fn`, `async fn`, `unsafe fn`, and ABI.
+  </Card>
+  <Card title="Structs, Enums & Unions" href="/items/structs-enums-unions">
+    Named struct fields, tuple structs, enum variants, discriminants, and union field access.
+  </Card>
+  <Card title="Traits & Impls" href="/items/traits-and-implementations">
+    Trait definitions, default implementations, unsafe traits, inherent impls, and the orphan rule.
+  </Card>
+  <Card title="Generics & Associated" href="/items/generics-and-associated-items">
+    Type parameters, lifetime parameters, const generics, where clauses, and associated items.
+  </Card>
+  <Card title="Constants & Statics" href="/items/constants-and-statics">
+    Compile-time `const` items, `static` items, `static mut`, and when to use each.
+  </Card>
+  <Card title="Use & Extern" href="/items/use-and-extern">
+    `use` path imports, glob imports, nested use trees, `extern` blocks, and FFI.
+  </Card>
+</CardGroup>

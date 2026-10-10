@@ -1,0 +1,359 @@
+---
+title: "Macros by Example: Declarative Macros with macro_rules!"
+sidebarTitle: "Macros by Example"
+description: "Learn how to write declarative macros in Rust using macro_rules!, including matchers, fragment specifiers, repetitions, hygiene, and scoping."
+---
+
+Declarative macros, defined with `macro_rules!`, allow you to write syntax extensions in a higher-level, pattern-based way. Each macro consists of one or more rules, where each rule has a _matcher_ describing the syntax it accepts and a _transcriber_ describing the syntax it produces. Macros can expand to expressions, statements, items (including traits, impls, and foreign items), types, or patterns.
+
+## Syntax
+
+The formal grammar for a `macro_rules!` definition is:
+
+```
+MacroRulesDefinition ->
+    `macro_rules` `!` IDENTIFIER MacroRulesDef
+
+MacroRulesDef ->
+      `(` MacroRules `)` `;`
+    | `[` MacroRules `]` `;`
+    | `{` MacroRules `}`
+
+MacroRules ->
+    MacroRule ( `;` MacroRule )* `;`?
+
+MacroRule ->
+    MacroMatcher `=>` MacroTranscriber
+```
+
+A macro invocation expands the macro at compile time and replaces the invocation with the result. Macros may be invoked as expressions, statements, patterns, types, items, associated items, and within other macro transcribers.
+
+```rust
+// Used as an expression.
+let x = vec![1, 2, 3];
+
+// Used as a statement.
+println!("Hello!");
+
+// Used in a pattern.
+macro_rules! pat {
+    ($i:ident) => (Some($i))
+}
+if let pat!(x) = Some(1) {
+    assert_eq!(x, 1);
+}
+
+// Used in a type.
+macro_rules! Tuple {
+    { $A:ty, $B:ty } => { ($A, $B) };
+}
+type N2 = Tuple!(i32, i32);
+```
+
+<Note>
+When used as an item or a statement, the `MacroInvocationSemi` form requires a semicolon at the end when not using curly braces. Visibility qualifiers are never allowed before a macro invocation or a `macro_rules!` definition.
+</Note>
+
+## Metavariables
+
+In the matcher, `$name:fragment-specifier` binds a piece of Rust syntax to the metavariable `$name`. In the transcriber, you refer to the captured fragment simply as `$name`.
+
+### Fragment Specifiers
+
+| Specifier | Matches |
+|-----------|---------|
+| `block` | A block expression (without inner attributes) |
+| `expr` | An expression |
+| `expr_2021` | An expression (excluding `_` and `const {}` at the top level; for pre-2024 compatibility) |
+| `ident` | An identifier or keyword (except `_`) |
+| `item` | An item |
+| `lifetime` | A lifetime token |
+| `literal` | A literal expression (optionally preceded by `-`) |
+| `meta` | The contents of an attribute |
+| `pat` | A pattern (in 2021+, includes top-level or-patterns) |
+| `pat_param` | A pattern without top-level alternation |
+| `path` | A type path |
+| `stmt` | A statement without trailing semicolon (except items that require one) |
+| `tt` | A single token or a token tree in matching delimiters |
+| `ty` | A type |
+| `vis` | A possibly-empty visibility qualifier |
+
+<Note>
+The `ident`, `lifetime`, and `tt` fragment types can be matched by literal tokens when forwarding to a second macro. All other fragment types produce an opaque AST node that can only be matched by the same fragment specifier.
+</Note>
+
+#### Edition Notes
+
+<Note>
+Starting with the **2021 edition**, `pat` fragment specifiers match top-level or-patterns (`Pattern`). Before 2021, they match `PatternNoTopAlt` (the same as `pat_param`). The relevant edition is the one of the `macro_rules!` definition.
+</Note>
+
+<Note>
+Starting with the **2024 edition**, `expr` fragment specifiers match `_` (underscore expressions) and `const {}` (const block expressions) at the top level. Use `expr_2021` to get pre-2024 behavior.
+</Note>
+
+### The `$crate` Metavariable
+
+The keyword metavariable `$crate` refers to the crate that defines the macro. It can be used at the start of a path to look up items or macros not in scope at the invocation site:
+
+```rust
+pub mod inner {
+    #[macro_export]
+    macro_rules! call_foo {
+        () => { $crate::inner::foo() };
+    }
+
+    pub fn foo() {}
+}
+```
+
+## Repetitions
+
+Repetitions allow matching and producing multiple occurrences of a fragment. Place tokens to repeat inside `$(...)`, follow with an optional separator token, then a repetition operator:
+
+| Operator | Meaning |
+|----------|---------|
+| `*` | Zero or more repetitions |
+| `+` | One or more repetitions |
+| `?` | Zero or one occurrence (no separator allowed) |
+
+```rust
+macro_rules! vec_like {
+    ( $( $x:expr ),* ) => {
+        {
+            let mut v = Vec::new();
+            $( v.push($x); )*
+            v
+        }
+    };
+}
+
+let v = vec_like![1, 2, 3];
+assert_eq!(v, [1, 2, 3]);
+```
+
+The separator token can be any token other than a delimiter or a repetition operator. The most common separators are `,` and `;`. Nested repetitions are permitted.
+
+During transcription, a metavariable must appear in exactly the same number, kind, and nesting order of repetitions in the transcriber as in the matcher. When multiple metavariables appear in the same repetition, they must be bound to the same number of fragments.
+
+```rust
+macro_rules! zip_pairs {
+    ( $( $i:ident ),* ; $( $j:ident ),* ) => {
+        ( $( ($i, $j) ),* )
+    };
+}
+
+// Both sides must have the same count: (a,d), (b,e), (c,f)
+let result = zip_pairs!(a, b, c; d, e, f);
+```
+
+## Transcribing
+
+When a macro is invoked, the macro expander looks up macro invocations by name and tries each rule in order. The first successful match is transcribed; if it results in an error, no further rules are tried.
+
+No lookahead is performed: the compiler must be able to determine how to parse the macro invocation one token at a time. The following is an error because of local ambiguity:
+
+```rust,compile_fail
+macro_rules! ambiguity {
+    ($($i:ident)* $j:ident) => { };
+}
+
+ambiguity!(error); // Error: local ambiguity
+```
+
+The `$` character cannot be matched or transcribed literally. Outer delimiters in the matcher will match any matching pair of delimiters in the invocation.
+
+## Follow-Set Ambiguity Restrictions
+
+To prevent ambiguities in current and future versions of Rust, certain fragment specifiers restrict what tokens may follow them:
+
+- **`expr`** and **`stmt`**: may only be followed by `=>`, `,`, or `;`
+- **`pat_param`**: may only be followed by `=>`, `,`, `=`, `|`, `if`, or `in`
+- **`pat`**: may only be followed by `=>`, `,`, `=`, `if`, or `in`
+- **`path`** and **`ty`**: may only be followed by `=>`, `,`, `=`, `|`, `;`, `:`, `>`, `>>`, `[`, `{`, `as`, `where`, or a `block` metavariable
+- **`vis`**: may only be followed by `,`, a non-raw `priv` keyword, any token starting a type, or an `ident`, `ty`, or `path` metavariable
+- All other specifiers have no restrictions
+
+<Warning>
+Before the **2021 edition**, `pat` may also be followed by `|`. Starting with 2021 this is no longer permitted.
+</Warning>
+
+## Hygiene
+
+Macros by example use _mixed-site hygiene_. Loop labels, block labels, and local variables are looked up at the macro _definition_ site. Other symbols (like function names or type names) are looked up at the _invocation_ site:
+
+```rust
+let x = 1;
+fn func() {
+    unreachable!("this is never called")
+}
+
+macro_rules! check {
+    () => {
+        assert_eq!(x, 1); // Uses `x` from the definition site.
+        func();           // Uses `func` from the invocation site.
+    };
+}
+
+{
+    let x = 2;
+    fn func() { /* does not panic */ }
+    check!();
+}
+```
+
+Labels and local variables defined in a macro expansion are not shared between invocations:
+
+```rust,compile_fail
+macro_rules! m {
+    (define) => { let x = 1; };
+    (refer)  => { dbg!(x); };    // ERROR: cannot find value `x`
+}
+
+m!(define);
+m!(refer);
+```
+
+## A Comprehensive Example
+
+The following macro demonstrates multiple arms, repetitions, and a separator:
+
+```rust
+macro_rules! hashmap {
+    // Base case: empty map.
+    () => {
+        ::std::collections::HashMap::new()
+    };
+    // One or more key => value pairs, optional trailing comma.
+    ( $( $key:expr => $val:expr ),+ $(,)? ) => {
+        {
+            let mut map = ::std::collections::HashMap::new();
+            $( map.insert($key, $val); )+
+            map
+        }
+    };
+}
+
+let empty: std::collections::HashMap<&str, i32> = hashmap!();
+let scores = hashmap!("Alice" => 10, "Bob" => 20, "Carol" => 30,);
+assert_eq!(scores["Alice"], 10);
+```
+
+## Scoping, Exporting, and Importing
+
+Macros have two forms of scope: **textual scope** and **path-based scope**. Textual scope is the default and is based on the order items appear in source files. Path-based scope works like item scoping.
+
+### Textual Scope
+
+A `macro_rules!` macro enters scope after its definition and goes out of scope when its surrounding module closes. It can be used recursively and can span into child modules or even across files:
+
+```rust
+macro_rules! m {
+    (1) => {};
+}
+
+m!(1);
+
+mod inner {
+    m!(1); // OK: m is still in scope from the parent
+
+    macro_rules! m {
+        (2) => {};
+    }
+    m!(2); // Uses the new definition
+}
+
+m!(1); // Uses the original definition
+```
+
+Macros can also be defined and used locally inside functions:
+
+```rust
+fn foo() {
+    macro_rules! local_mac {
+        () => { println!("local!") };
+    }
+    local_mac!();
+}
+```
+
+### Path-Based Scope
+
+By default, a macro has no path-based scope. Macros can gain path-based scope in two ways:
+
+1. **Re-exporting via `pub use`**
+2. **Using `#[macro_export]`**
+
+### The `macro_use` Attribute
+
+The `#[macro_use]` attribute serves two purposes:
+
+- Applied to a **module**, it extends the scope of macros defined within so they remain visible after the module closes.
+- Applied to an **`extern crate`** declaration, it imports `#[macro_export]`-ed macros from the external crate into the `macro_use` prelude.
+
+```rust
+#[macro_use]
+mod inner {
+    macro_rules! m {
+        () => {};
+    }
+}
+m!(); // OK: m's scope extends beyond the module
+```
+
+```rust,ignore
+#[macro_use(lazy_static)] // or #[macro_use] to import all
+extern crate lazy_static;
+
+lazy_static! {}
+```
+
+<Note>
+Macros imported via `macro_use` on an `extern crate` go into the `macro_use` prelude, not textual scope. They can therefore be shadowed by any other name and can be used before the import statement in the file.
+</Note>
+
+### The `macro_export` Attribute
+
+`#[macro_export]` exports a macro from the crate root and gives it path-based scope, making it available as `crate::macro_name` or `self::macro_name`:
+
+```rust
+#[macro_export]
+macro_rules! warn {
+    ($message:expr) => { eprintln!("WARN: {}", $message) };
+}
+
+self::warn!("example"); // OK: path-based lookup
+crate::warn!("example"); // OK
+```
+
+From another crate you can refer to the exported macro by its path:
+
+```rust,ignore
+fn main() {
+    log::warn!("example warning");
+}
+```
+
+<Note>
+Without `#[macro_export]`, only textual scope is available and path-based resolution fails. By default, macros have an implicit visibility of `pub(crate)`; `#[macro_export]` changes it to `pub`.
+</Note>
+
+#### `local_inner_macros`
+
+Adding `local_inner_macros` to `#[macro_export]` causes all single-segment macro invocations in the definition to receive an implicit `$crate::` prefix. This is primarily a migration tool for pre-`$crate` code:
+
+```rust
+#[macro_export(local_inner_macros)]
+macro_rules! helped {
+    () => { helper!() } // Automatically becomes $crate::helper!()
+}
+
+#[macro_export]
+macro_rules! helper {
+    () => { () }
+}
+```
+
+<Tip>
+Prefer `$crate::` over `local_inner_macros` in new code. `local_inner_macros` exists primarily to help migrate older crates.
+</Tip>

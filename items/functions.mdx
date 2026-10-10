@@ -1,0 +1,257 @@
+---
+title: "Functions in Rust: Syntax, Parameters, and Return Types"
+sidebarTitle: "Functions"
+description: "Complete guide to Rust function syntax: parameters, return types, const fn, async fn, unsafe fn, extern ABI, and variadic functions."
+---
+
+Functions are one of the most fundamental items in Rust. A _function_ consists of a block (the function's _body_), along with a name, a set of parameters, and an output type — all of which except the name are optional. Functions are declared with the `fn` keyword, which defines the given name in the value namespace of the module or block where it is located.
+
+```rust
+fn answer_to_life_the_universe_and_everything() -> i32 {
+    return 42;
+}
+```
+
+## Function syntax
+
+The full grammar for functions is:
+
+```
+Function ->
+    FunctionQualifiers `fn` IDENTIFIER GenericParams?
+        `(` FunctionParameters? `)`
+        FunctionReturnType? WhereClause?
+        ( BlockExpression | `;` )
+
+FunctionQualifiers -> `const`? `async`? ItemSafety? (`extern` Abi?)?
+ItemSafety -> `safe` | `unsafe`
+Abi -> STRING_LITERAL | RAW_STRING_LITERAL
+```
+
+If the output type is not explicitly stated, it defaults to the unit type `()`. When referred to, a function yields a first-class value of the corresponding zero-sized [function item type].
+
+## Function parameters
+
+Function parameters are irrefutable [patterns], so any pattern valid in an else-less `let` binding is also valid as a parameter:
+
+```rust
+fn first((value, _): (i32, i32)) -> i32 { value }
+```
+
+If the first parameter is a `SelfParam`, the function is a _method_ and may only appear as an associated function in a trait or implementation.
+
+### Generic functions
+
+A generic function allows one or more parameterized types to appear in its signature. Type parameters must be explicitly declared in angle-bracket-enclosed, comma-separated list following the function name. [Trait] bounds can be specified using the `where` syntax:
+
+```rust
+// foo is generic over A and B
+fn foo<A, B>(x: A, y: B) {}
+
+use std::fmt::Debug;
+fn bar<T>(x: T) where T: Debug {}
+```
+
+When a generic function is referenced, its type is instantiated based on the context. Type parameters can also be explicitly supplied: `mem::size_of::<u32>() == 4`.
+
+## Function body
+
+The body block of a function is conceptually wrapped in another block that first binds the argument patterns and then returns the value of the function's body. The tail expression of the block, if evaluated, is returned to the caller. An explicit `return` expression short-cuts this implicit return.
+
+```rust
+// These two functions are equivalent:
+fn add_one(x: i32) -> i32 {
+    x + 1
+}
+
+fn add_one_explicit(x: i32) -> i32 {
+    return x + 1;
+}
+```
+
+Functions without a body block are terminated with a semicolon. This form may only appear in a [trait] or [external block].
+
+## Const functions
+
+Functions may be qualified with `const`, making them usable in [const contexts] and eligible to be evaluated at compile time. See the [const evaluation] documentation for the full definition of what is permitted inside a `const fn`.
+
+```rust
+const fn add(a: u32, b: u32) -> u32 {
+    a + b
+}
+
+const RESULT: u32 = add(1, 2);
+```
+
+## Async functions
+
+Functions may be qualified as `async`. An async function does no work when called — instead, it captures its arguments into a future. When polled, that future executes the function's body.
+
+```rust
+async fn regular_example() { }
+async unsafe fn unsafe_example() { }
+```
+
+An async function is roughly equivalent to a function that returns `impl Future` with an `async move` block as its body:
+
+```rust
+// Source
+async fn example(x: &str) -> usize {
+    x.len()
+}
+```
+
+```rust
+# use std::future::Future;
+// Desugared (roughly)
+fn example<'a>(x: &'a str) -> impl Future<Output = usize> + 'a {
+    async move { x.len() }
+}
+```
+
+<Note>
+Async functions are only available beginning with Rust 2018.
+</Note>
+
+### Combining `async` and `unsafe`
+
+It is legal to declare a function that is both async and unsafe. The resulting function is unsafe to call and returns a future. This future is an ordinary future — an `unsafe` context is **not** required to `.await` it:
+
+```rust
+// Returns a future that, when awaited, dereferences `x`.
+//
+// Soundness condition: `x` must be safe to dereference until
+// the resulting future is complete.
+async unsafe fn unsafe_example(x: *const i32) -> i32 {
+    *x
+}
+
+async fn safe_example() {
+    let p = 22;
+    // An `unsafe` block is required to invoke the function initially:
+    let future = unsafe { unsafe_example(&p) };
+    // But no `unsafe` block required here:
+    let q = future.await;
+}
+```
+
+## Unsafe functions
+
+A function qualified with `unsafe` can only be called from an `unsafe` block or another `unsafe` function. This indicates that the function imposes additional obligations on its caller to ensure soundness.
+
+```rust
+unsafe fn dangerous_operation(ptr: *mut i32) {
+    *ptr = 42;
+}
+
+fn call_it() {
+    let mut value = 0i32;
+    unsafe {
+        dangerous_operation(&mut value);
+    }
+}
+```
+
+## Extern function qualifier
+
+The `extern` function qualifier allows providing function _definitions_ that can be called with a particular ABI:
+
+```rust
+// Declares a function with the "C" ABI
+extern "C" fn new_i32() -> i32 { 0 }
+
+// Declares a function with the "stdcall" ABI
+#[cfg(any(windows, target_arch = "x86"))]
+extern "stdcall" fn new_i32_stdcall() -> i32 { 0 }
+```
+
+When `extern Abi?` is omitted, the ABI `"Rust"` is assigned. When the `extern` keyword is used without an explicit ABI string, it defaults to `"C"`:
+
+```rust
+extern fn new_i32() -> i32 { 0 }
+let fptr: extern fn() -> i32 = new_i32;
+// Equivalent to:
+extern "C" fn new_i32_c() -> i32 { 0 }
+let fptr2: extern "C" fn() -> i32 = new_i32_c;
+```
+
+### ABI and unwinding
+
+Most ABI strings come in two variants: one without an `-unwind` suffix and one with. The `Rust` ABI always permits unwinding. The table below summarizes unwinding behavior at ABI boundaries:
+
+| panic runtime | ABI | `panic`-unwind | Native unwind (unforced) |
+|---|---|---|---|
+| `panic=unwind` | unwinding | unwind | unwind |
+| `panic=unwind` | non-unwinding | abort | undefined behavior |
+| `panic=abort` | unwinding | panic aborts without unwinding | abort |
+| `panic=abort` | non-unwinding | panic aborts without unwinding | undefined behavior |
+
+<Warning>
+When a panic is turned into an abort by a non-unwinding ABI boundary with `panic=unwind`, either no destructors (`Drop` calls) will run, or all destructors up to the ABI boundary will run. It is unspecified which behavior occurs.
+</Warning>
+
+## C-variadic functions
+
+A C-variadic function accepts a variable argument list `pat: ...` as its final parameter. This parameter stands in for an arbitrary number of arguments that may be passed by the caller. In the function body, its type is `VaList<'_>`.
+
+```rust
+unsafe extern "C" fn f(mut ap: ...) -> f64 {
+    unsafe { ap.next_arg::<f64>() }
+}
+```
+
+C-variadic functions have these restrictions:
+
+- Function definitions must be `unsafe`
+- They cannot be `async`
+- They cannot be `const`
+- Only `extern "C"` and `extern "C-unwind"` support variadic definitions (except for naked functions)
+
+```rust
+unsafe extern "C" {
+    unsafe fn foo(...);
+    unsafe fn bar(x: i32, ...);
+    unsafe fn with_name(format: *const u8, args: ...);
+    // SAFETY: This function does not access variadic arguments.
+    safe fn ignores_variadic_arguments(x: i32, ...);
+}
+```
+
+## Attributes on functions
+
+[Outer attributes] are allowed on functions. [Inner attributes] are allowed directly after the `{` inside the function body:
+
+```rust
+fn documented() {
+    #![doc = "Example"]
+}
+```
+
+Meaningful built-in attributes on functions include: `cfg`, `cfg_attr`, `cold`, `deprecated`, `doc`, `export_name`, `inline`, `link_section`, `must_use`, `no_mangle`, and lint check attributes.
+
+### Attributes on function parameters
+
+Outer attributes are allowed on function parameters. The permitted built-in attributes are restricted to `cfg`, `cfg_attr`, `allow`, `warn`, `deny`, and `forbid`:
+
+```rust
+fn len(
+    #[cfg(windows)] slice: &[u16],
+    #[cfg(not(windows))] slice: &[u8],
+) -> usize {
+    slice.len()
+}
+```
+
+## Diverging functions
+
+A function that never returns has the return type `!` (the never type). Such functions are called _diverging functions_:
+
+```rust
+fn diverges() -> ! {
+    panic!("This function never returns!");
+}
+```
+
+<Tip>
+Diverging functions (`-> !`) are useful for functions that always panic, exit the process, or loop forever. The `!` type can be coerced to any type, so you can use a diverging call anywhere an expression is expected.
+</Tip>

@@ -1,0 +1,314 @@
+---
+title: "Use Declarations and Extern Blocks in Rust"
+sidebarTitle: "Use & Extern"
+description: "Rust use declarations for path imports, glob imports, nested use trees, extern blocks for FFI, link attributes, and extern crate syntax."
+---
+
+Two items handle the boundaries between Rust code and the outside world: `use` declarations and `extern` blocks. A `use` declaration creates local name bindings that are synonymous with paths elsewhere in the module tree, shortening verbose paths and enabling re-exports. An `extern` block declares items — functions and statics — that are defined outside of Rust, forming the foundation of Rust's foreign function interface (FFI). Together they control how Rust code refers to both internal and external names.
+
+## Use declarations
+
+A _use declaration_ creates one or more local name bindings synonymous with some other path. Usually a `use` declaration is used to shorten the path required to refer to a module item. Use declarations may appear in modules and blocks — usually at the top. A public `use` declaration is also called a _re-export_.
+
+```rust
+use std::collections::hash_map::{self, HashMap};
+
+fn foo<T>(_: T) {}
+fn bar(map1: HashMap<String, usize>, map2: hash_map::HashMap<String, usize>) {}
+
+fn main() {
+    // `use` declarations can also exist inside of functions
+    use std::option::Option::{Some, None};
+
+    foo(vec![Some(1.0f64), None]);
+
+    let map1 = HashMap::new();
+    let map2 = hash_map::HashMap::new();
+    bar(map1, map2);
+}
+```
+
+### `as` renames
+
+The `as` keyword changes the name of an imported entity:
+
+```rust
+use inner::foo as bar;
+
+mod inner {
+    pub fn foo() {}
+}
+```
+
+### Brace syntax (nested use trees)
+
+Braces can be used in the last segment of the path to import multiple entities from the previous segment. Braces can be nested, creating a tree of paths:
+
+```rust
+// Creates bindings to:
+// - `std::collections::BTreeSet`
+// - `std::collections::hash_map`
+// - `std::collections::hash_map::HashMap`
+use std::collections::{BTreeSet, hash_map::{self, HashMap}};
+```
+
+### `self` imports
+
+The keyword `self` within brace syntax creates a binding of the parent entity under its own name:
+
+```rust
+mod stuff {
+    pub fn foo() {}
+    pub fn bar() {}
+}
+mod example {
+    // Creates a binding for `stuff` and `foo`.
+    use crate::stuff::{self, foo};
+    pub fn baz() {
+        foo();
+        stuff::bar();
+    }
+}
+```
+
+<Note>
+`self` only creates a binding from the type namespace of the parent entity. For example, `use bar::foo::{self}` imports only the module `foo`, not a function also named `foo` in the value namespace.
+</Note>
+
+### Glob imports
+
+The `*` character imports all importable entities from the preceding segment:
+
+```rust
+use foo::*;
+
+mod foo {
+    fn i_am_private() {}
+    pub enum Example {
+        V1,
+        V2,
+    }
+    pub fn bar() {
+        // Creates local aliases to `V1` and `V2`
+        use Example::*;
+        let x = V1;
+    }
+}
+```
+
+Items and named imports are allowed to shadow names from glob imports in the same namespace. The `*` cannot be used as the first or intermediate segment, and cannot be used to import a module's contents into itself.
+
+### Underscore imports
+
+Items can be imported without binding to a name using `use path as _`. This is particularly useful for importing a trait so that its methods may be used without importing the trait's symbol itself:
+
+```rust
+mod foo {
+    pub trait Zoo {
+        fn zoo(&self) {}
+    }
+    impl<T> Zoo for T {}
+}
+
+use self::foo::Zoo as _;
+struct Zoo;  // Underscore import avoids name conflict with this item.
+
+fn main() {
+    let z = Zoo;
+    z.zoo();
+}
+```
+
+Macros may safely emit the same underscore import multiple times in the same scope.
+
+### Re-exporting with `pub use`
+
+Rust allows publicly re-exporting items through a `pub use` directive:
+
+```rust
+mod quux {
+    pub use self::foo::{bar, baz};
+    pub mod foo {
+        pub fn bar() {}
+        pub fn baz() {}
+    }
+}
+
+fn main() {
+    quux::bar();
+    quux::baz();
+}
+```
+
+### Use path restrictions
+
+- When using `crate`, `self`, or `super` to refer to a module itself, you must use `as` to define the binding name
+- `use` imports cannot create duplicate bindings of the same name in the same namespace in a module or block
+- `use` paths cannot refer to enum variants through a type alias
+
+## Extern blocks
+
+External blocks provide _declarations_ of items that are not _defined_ in the current crate. They are the basis of Rust's foreign function interface. Two kinds of item declarations are allowed in external blocks: functions and statics.
+
+```rust
+unsafe extern "C" {
+    unsafe fn printf(format: *const u8, ...) -> i32;
+    safe fn strlen(s: *const u8) -> usize;
+    static mut errno: i32;
+}
+```
+
+<Note>
+Starting with the 2024 Edition, the `unsafe` keyword is semantically required before the `extern` keyword on external blocks. In earlier editions it was optional.
+</Note>
+
+### Functions in extern blocks
+
+Functions within external blocks are declared the same way as other Rust functions, except they must not have a body (terminated with `;` instead of a block). Patterns are not allowed in parameters — only `IDENTIFIER` or `_` may be used.
+
+A function declared in an extern block is implicitly `unsafe` unless the `safe` function qualifier is present:
+
+```rust
+unsafe extern "C" {
+    unsafe fn dangerous(x: i32) -> i32;  // explicitly unsafe
+    safe fn length(s: *const u8) -> usize; // explicitly safe
+    // An undeclared function is implicitly unsafe
+}
+```
+
+### Statics in extern blocks
+
+Statics within extern blocks are declared the same way as statics outside of extern blocks, except they do not have an expression initializing their value. Unless qualified as `safe`, accessing an extern static is `unsafe`:
+
+```rust,ignore
+unsafe extern {
+    static MAX_SIZE: usize;
+    safe static VERSION: u32;
+}
+```
+
+### ABI strings
+
+The `extern` keyword can be followed by an optional ABI string. If not specified, it defaults to `"C"`. Standard ABI strings supported on all platforms include:
+
+- `"Rust"` — The native Rust calling convention (default for non-`extern` functions)
+- `"C"` — The default C ABI for the target
+- `"system"` — Equivalent to `"C"` except on Windows x86_32 where it matches `"stdcall"` for non-variadic functions
+
+Each of `"C"` and `"system"` also has a `-unwind` variant (`"C-unwind"`, `"system-unwind"`) that changes the behavior when the callee unwinds via panics or C++ exceptions.
+
+```rust
+// Interface to the Windows API.
+unsafe extern "system" { /* ... */ }
+
+// C library function.
+#[link(name = "m")]
+unsafe extern "C" {
+    unsafe fn sqrt(x: f64) -> f64;
+}
+```
+
+## Variadic functions in extern blocks
+
+Functions within extern blocks may be made variadic by specifying `...` as the last parameter:
+
+```rust
+unsafe extern "C" {
+    unsafe fn foo(...);
+    unsafe fn bar(x: i32, ...);
+    unsafe fn with_name(format: *const u8, args: ...);
+    // SAFETY: This function guarantees it will not access variadic arguments.
+    safe fn ignores_variadic_arguments(x: i32, ...);
+}
+```
+
+<Warning>
+The `safe` qualifier should not be used on a variadic function in an `extern` block unless that function guarantees it will not access the variadic arguments at all. Passing an unexpected number of arguments or arguments of an unexpected type to a variadic function may lead to undefined behavior.
+</Warning>
+
+Variadic parameters can only be specified for extern blocks with these ABI strings (or their `-unwind` variants): `"aapcs"`, `"C"`, `"cdecl"`, `"efiapi"`, `"system"`, `"sysv64"`, `"win64"`.
+
+## The `link` attribute
+
+The `link` attribute specifies the name of a native library that the compiler should link with for the items within an `extern` block:
+
+```rust,ignore
+#[link(name = "crypto")]
+unsafe extern {
+    // ...
+}
+
+#[link(name = "CoreFoundation", kind = "framework")]
+unsafe extern {
+    // ...
+}
+
+#[link(wasm_import_module = "foo")]
+unsafe extern {
+    // ...
+}
+```
+
+The `kind` key specifies the kind of library:
+- `dylib` — Dynamic library (default if `kind` is not specified)
+- `static` — Static library
+- `framework` — macOS framework (macOS targets only)
+- `raw-dylib` — Dynamic library where the compiler generates the import library (Windows targets only)
+
+### The `link_name` attribute
+
+The `link_name` attribute may be applied to declarations inside an `extern` block to specify the actual symbol name to import:
+
+```rust
+unsafe extern "C" {
+    #[link_name = "actual_symbol_name"]
+    safe fn name_in_rust();
+}
+```
+
+## A complete FFI example
+
+Here is a complete example demonstrating how to call a C library function from Rust:
+
+```rust
+use std::ffi::CString;
+
+#[link(name = "c")]
+unsafe extern "C" {
+    unsafe fn strlen(s: *const u8) -> usize;
+}
+
+fn rust_strlen(s: &str) -> usize {
+    let c_string = CString::new(s).expect("CString::new failed");
+    unsafe { strlen(c_string.as_ptr() as *const u8) }
+}
+
+fn main() {
+    let s = "Hello, world!";
+    println!("Length: {}", rust_strlen(s));
+}
+```
+
+<Tip>
+When writing FFI code, prefer using the `safe` qualifier on extern functions whenever possible and document the invariants required. This makes the FFI boundary explicit and helps reviewers identify where unsafe code is actually necessary.
+</Tip>
+
+## Extern crate declarations
+
+An `extern crate` declaration specifies a dependency on an external crate. In modern Rust (2018 edition and later), most crates are automatically available through the extern prelude populated from `Cargo.toml`, making explicit `extern crate` declarations rare.
+
+```rust,ignore
+extern crate pcre;
+extern crate std; // equivalent to: extern crate std as std;
+extern crate std as ruststd; // linking to 'std' under another name
+```
+
+The `self` crate may be imported, which requires an `as` clause to name the binding:
+
+```rust,ignore
+extern crate self as my_crate;
+```
+
+<Note>
+In Rust 2018 and later, you almost never need to write `extern crate` — just add the dependency to `Cargo.toml` and use it directly. `extern crate` remains useful when you need to import macros from a crate with `#[macro_use]`, when using `no_std` environments, or when explicitly renaming a crate.
+</Note>

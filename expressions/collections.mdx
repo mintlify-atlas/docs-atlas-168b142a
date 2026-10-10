@@ -1,0 +1,254 @@
+---
+title: "Array, Tuple, Struct, and Range Expressions in Rust"
+sidebarTitle: "Collections"
+description: "Learn Rust array, tuple, struct, and range expressions: list and repeat arrays, indexing, functional update syntax, and all six range forms."
+---
+
+Rust provides dedicated expression syntax for constructing its core collection and composite types: arrays, tuples, structs, and ranges. Each form has precise semantics around construction, copying vs. moving, indexing, and the functional record update pattern. This page covers each in detail with real examples.
+
+## Array Expressions
+
+*Array expressions* construct arrays. There are two forms:
+
+### List Form: `[a, b, c]`
+
+The first form lists every value in the array — a comma-separated list of expressions of uniform type enclosed in square brackets. This produces an array containing each value in the order written.
+
+```rust
+[1, 2, 3, 4];
+["a", "b", "c", "d"];
+[0u8, 0u8, 0u8, 0u8,];
+[[1, 0, 0], [0, 1, 0], [0, 0, 1]]; // 2D array
+```
+
+### Repeat Form: `[expr; N]`
+
+The second form uses two expressions separated by a semicolon: a *repeat operand* and a *length operand*. This creates an array with the length of the length operand where each element is a copy of the repeat operand.
+
+```rust
+[0; 128];   // array with 128 zeros
+```
+
+The length operand must be an inferred const or a constant expression of type `usize`:
+
+```rust
+const C: usize = 1;
+let _: [u8; C] = [0; 1];   // literal
+let _: [u8; C] = [0; C];   // constant item
+let _: [u8; C] = [0; _];   // inferred const
+```
+
+<Note>
+  If the length operand has a value greater than 1, the repeat operand must implement `Copy`, or be a `const` block expression, or be a path to a constant item.
+</Note>
+
+```rust
+const EMPTY: Vec<i32> = Vec::new();
+[EMPTY; 2];  // constant item as repeat operand
+```
+
+---
+
+## Array and Slice Indexing Expressions
+
+Arrays and slices can be indexed with a `usize` expression in square brackets:
+
+```rust
+([1, 2, 3, 4])[2];        // evaluates to 3
+
+let b = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+b[1][2];                  // multidimensional indexing → 0
+```
+
+Indices are **zero-based**. Array access with a constant index is checked at compile time; otherwise bounds are checked at runtime and cause a panic if out of range.
+
+```rust,should_panic
+let n = 10;
+let y = (["a", "b"])[n];  // panics at runtime
+```
+
+For types other than arrays and slices, `a[b]` desugars to `*std::ops::Index::index(&a, b)` (or `IndexMut` in a mutable context). Rust automatically dereferences `a` as needed to find an implementation.
+
+---
+
+## Tuple Expressions
+
+A *tuple expression* constructs a tuple value. The syntax is a parenthesized, comma-separated list of expressions — the *tuple initializer operands*.
+
+<Note>
+  A single-element tuple requires a trailing comma to disambiguate from a parenthesized expression: `("x".to_string(),)` is a `(String,)`, while `("x".to_string())` is just a `String`.
+</Note>
+
+| Expression | Type |
+|---|---|
+| `()` | `()` (unit) |
+| `(0.0, 4.5)` | `(f64, f64)` |
+| `("x".to_string(), )` | `(String,)` |
+| `("a", 4usize, true)` | `(&'static str, usize, bool)` |
+
+The first operand initializes field `0`, the second initializes field `1`, and so on.
+
+---
+
+## Tuple Indexing Expressions
+
+A *tuple indexing expression* accesses fields of tuples and tuple structs using a `.` followed by a decimal literal with no leading zeros, underscores, or suffix.
+
+```rust
+// Indexing a tuple
+let pair = ("a string", 2);
+assert_eq!(pair.1, 2);
+
+// Indexing a tuple struct
+struct Point(f32, f32);
+let point = Point(1.0, 0.0);
+assert_eq!(point.0, 1.0);
+assert_eq!(point.1, 0.0);
+```
+
+<Note>
+  Valid tuple indices: `0`, `2`. Invalid: `01`, `0_`, `0i32`.
+</Note>
+
+---
+
+## Struct Expressions
+
+A *struct expression* creates a struct, enum variant, or union value. It consists of a path to the item followed by curly braces containing field values.
+
+```rust
+struct Point { x: f64, y: f64 }
+struct NothingInMe { }
+mod game { pub struct User<'a> { pub name: &'a str, pub age: u32, pub score: usize } }
+enum Enum { Variant {} }
+
+Point { x: 10.0, y: 20.0 };
+NothingInMe {};
+let u = game::User { name: "Joe", age: 35, score: 100_000 };
+Enum::Variant {};
+```
+
+### Field Struct Expression
+
+In a struct expression with curly braces, you specify the value for each field in any order, with the field name separated from its value by a colon.
+
+```rust
+struct Point3d { x: i32, y: i32, z: i32 }
+let p = Point3d { x: 1, y: 2, z: 3 };
+```
+
+### Struct Field Init Shorthand
+
+When a local variable has the same name as a field, you can use the shorthand `fieldname` instead of `fieldname: fieldname`:
+
+```rust
+struct Point3d { x: i32, y: i32, z: i32 }
+let x = 0;
+let y_value = 0;
+let z = 0;
+
+Point3d { x: x, y: y_value, z: z };  // verbose form
+Point3d { x, y: y_value, z };         // shorthand for x and z
+```
+
+### Functional Update Syntax (`..base`)
+
+A struct expression can end with `..` followed by an expression (*the base*) of the same struct type. This uses the specified field values for the listed fields and moves or copies the remaining fields from the base.
+
+```rust
+struct Point3d { x: i32, y: i32, z: i32 }
+let mut base = Point3d { x: 1, y: 2, z: 3 };
+let y_ref = &mut base.y;
+Point3d { y: 0, z: 10, ..base }; // only base.x is accessed
+drop(y_ref);
+```
+
+<Warning>
+  All fields of the struct must be visible in a struct expression, even those not explicitly named in the functional update syntax.
+</Warning>
+
+### Tuple Struct Construction
+
+Tuple structs are typically instantiated with a call expression:
+
+```rust
+struct Position(i32, i32, i32);
+Position(0, 0, 0);         // typical construction
+let c = Position;          // `c` is a function that takes 3 arguments
+let pos = c(8, 6, 7);     // creates a `Position` value
+```
+
+You can also use numeric field indices in a struct expression, including with functional update syntax:
+
+```rust
+struct Color(u8, u8, u8);
+let c1 = Color(0, 0, 0);
+let c2 = Color { 0: 255, 1: 127, 2: 0 }; // by index
+let c3 = Color { 1: 0, ..c2 };            // fill remaining fields
+```
+
+### Unit Struct Construction
+
+Unit structs can be created with a path expression or a struct expression:
+
+```rust
+struct Gamma;
+let a = Gamma;      // path expression (value namespace)
+let b = Gamma {};   // struct expression (type namespace)
+```
+
+<Note>
+  Struct expressions cannot be used directly in a `loop`, `if`, `while`, or `for` head, or as the scrutinee of `if let` or `match`, unless wrapped in parentheses.
+</Note>
+
+---
+
+## Range Expressions
+
+The `..` and `..=` operators construct one of the `std::ops::Range` variants depending on which bounds are specified:
+
+| Syntax | Type | Range |
+|--------|------|-------|
+| `start..end` | `std::ops::Range` | start ≤ x < end |
+| `start..` | `std::ops::RangeFrom` | start ≤ x |
+| `..end` | `std::ops::RangeTo` | x < end |
+| `..` | `std::ops::RangeFull` | — |
+| `start..=end` | `std::ops::RangeInclusive` | start ≤ x ≤ end |
+| `..=end` | `std::ops::RangeToInclusive` | x ≤ end |
+
+```rust
+1..2;   // std::ops::Range
+3..;    // std::ops::RangeFrom
+..4;    // std::ops::RangeTo
+..;     // std::ops::RangeFull
+5..=6;  // std::ops::RangeInclusive
+..=7;   // std::ops::RangeToInclusive
+```
+
+Range expressions are equivalent to constructing the corresponding struct directly:
+
+```rust
+let x = std::ops::Range { start: 0, end: 10 };
+let y = 0..10;
+assert_eq!(x, y);
+```
+
+Ranges are commonly used in `for` loops:
+
+```rust
+for i in 1..11 {
+    println!("{}", i);
+}
+```
+
+And as slice indices:
+
+```rust
+let arr = [0, 1, 2, 3, 4];
+let slice = &arr[1..4];  // [1, 2, 3]
+assert_eq!(slice, &[1, 2, 3]);
+```
+
+<Note>
+  Range expressions require parentheses when used in contexts where the precedence would be ambiguous, such as inside certain other operators.
+</Note>

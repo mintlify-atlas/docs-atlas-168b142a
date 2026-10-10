@@ -1,0 +1,207 @@
+---
+title: "Attributes in Rust: Syntax, Placement, and Built-In Attributes"
+sidebarTitle: "Overview"
+description: "Overview of Rust attributes: inner and outer syntax, meta item forms, active vs inert attributes, tool attributes, and the built-in attribute index."
+---
+
+An _attribute_ is general, free-form metadata that is interpreted according to its name, convention, language version, and compiler version. Attributes are modeled on attributes in [ECMA-335](https://www.ecma-international.org/publications-and-standards/standards/ecma-335/), with syntax drawn from [ECMA-334 (C#)](https://www.ecma-international.org/publications-and-standards/standards/ecma-334/). They can control code generation, enable conditional compilation, drive testing, attach documentation, and much more.
+
+## Syntax
+
+```
+InnerAttribute -> `#` `!` `[` Attr `]`
+OuterAttribute -> `#` `[` Attr `]`
+
+Attr ->
+      SimplePath AttrInput?
+    | `unsafe` `(` SimplePath AttrInput? `)`
+
+AttrInput ->
+      DelimTokenTree
+    | `=` Expression
+```
+
+### Inner Attributes
+
+_Inner attributes_ (`#![...]`) apply to the form they are declared _within_ — typically the enclosing module or crate. They are placed at the top of the item they affect:
+
+```rust
+// Applies to the entire crate.
+#![crate_type = "lib"]
+
+fn some_unused_variables() {
+    // Applies to the entire function body.
+    #![allow(unused_variables)]
+
+    let x = ();
+    let y = ();
+}
+```
+
+### Outer Attributes
+
+_Outer attributes_ (`#[...]`) apply to the form that _follows_ the attribute:
+
+```rust
+// Marks the function as a unit test.
+#[test]
+fn test_foo() { /* ... */ }
+
+// Compiles this module only on Linux.
+#[cfg(target_os = "linux")]
+mod bar { /* ... */ }
+
+// Suppresses a lint warning.
+#[allow(non_camel_case_types)]
+type int8_t = i8;
+```
+
+### Unsafe Attributes
+
+Some attributes are _unsafe_ to apply because they impose obligations that the compiler cannot verify. These must be wrapped in `unsafe(...)`:
+
+```rust
+#[unsafe(no_mangle)]
+pub extern "C" fn my_function() {}
+```
+
+The unsafe attributes are: `export_name`, `link_section`, `naked`, and `no_mangle`.
+
+## Meta Item Attribute Syntax
+
+Most built-in attributes use the _meta item_ syntax for their input. This supports several forms:
+
+| Style | Example |
+|-------|---------|
+| MetaWord | `no_std` |
+| MetaNameValueStr | `doc = "example"` |
+| MetaListPaths | `allow(unused, clippy::inline_always)` |
+| MetaListIdents | `macro_use(foo, bar)` |
+| MetaListNameValueStr | `link(name = "CoreFoundation", kind = "framework")` |
+
+Expressions in meta items must expand to literal expressions (without integer or float type suffixes).
+
+## Active and Inert Attributes
+
+Attributes are classified as either **active** or **inert**:
+
+- **Active attributes** remove themselves from the item during processing. `cfg`, `cfg_attr`, and all attribute macros are active.
+- **Inert attributes** remain on the item. All other built-in attributes are inert.
+
+## Where Attributes Can Be Applied
+
+Attributes may be placed in a wide variety of positions:
+
+- All **item declarations** accept outer attributes. `extern` blocks, functions, implementations, and modules also accept inner attributes.
+- Most **statements** accept outer attributes.
+- **Block expressions** accept outer and inner attributes when they are the outer expression of an expression statement or the final expression of another block expression.
+- **Enum variants** and **struct/union fields** accept outer attributes.
+- **Match expression arms** accept outer attributes.
+- **Generic lifetime or type parameters** accept outer attributes.
+- **Function, closure, and function pointer parameters** accept outer attributes.
+- **Expressions** accept outer attributes in limited situations.
+
+## Tool Attributes
+
+Tool attributes let external tools define their own attributes under a namespaced prefix. The first segment of the attribute path is the tool name:
+
+```rust
+// Tells rustfmt not to format this item.
+#[rustfmt::skip]
+struct S {}
+
+// Sets the cyclomatic complexity threshold for clippy.
+#[clippy::cyclomatic_complexity = "100"]
+pub fn f() {}
+```
+
+When a tool is not in use, its attributes are accepted without warning. Tool attributes are not available when `#[no_implicit_prelude]` is used. `rustc` currently recognizes the tools `clippy`, `rustfmt`, `diagnostic`, `miri`, and `rust_analyzer`.
+
+## Attribute Kinds
+
+| Kind | Description |
+|------|-------------|
+| Built-in attributes | Defined by the language and compiler |
+| Proc macro attributes | Defined by `#[proc_macro_attribute]` functions |
+| Derive macro helper attributes | Introduced by derive macros for use on fields/variants |
+| Tool attributes | Namespaced attributes for external tools |
+
+## Built-In Attribute Index
+
+The complete set of built-in attributes, grouped by category:
+
+### Conditional Compilation
+- [`cfg`](/attributes/diagnostics-and-codegen) — Controls conditional compilation.
+- [`cfg_attr`](/attributes/diagnostics-and-codegen) — Conditionally includes attributes.
+
+### Testing
+- [`test`](/attributes/testing-and-derive) — Marks a function as a test.
+- [`ignore`](/attributes/testing-and-derive) — Disables a test function.
+- [`should_panic`](/attributes/testing-and-derive) — Indicates a test should panic.
+
+### Derive
+- [`derive`](/attributes/testing-and-derive) — Automatic trait implementations.
+- [`automatically_derived`](/attributes/testing-and-derive) — Marker for derive-generated impls.
+
+### Macros
+- `macro_export` — Exports a `macro_rules` macro for cross-crate use.
+- `macro_use` — Expands macro visibility or imports macros from other crates.
+- `proc_macro` — Defines a function-like macro.
+- `proc_macro_derive` — Defines a derive macro.
+- `proc_macro_attribute` — Defines an attribute macro.
+
+### Diagnostics
+- [`allow`, `expect`, `warn`, `deny`, `forbid`](/attributes/diagnostics-and-codegen) — Alters lint level.
+- [`deprecated`](/attributes/diagnostics-and-codegen) — Generates deprecation notices.
+- [`must_use`](/attributes/diagnostics-and-codegen) — Generates a lint for unused values.
+- `diagnostic::on_unimplemented` — Customizes the error message when a trait is not implemented.
+- `diagnostic::do_not_recommend` — Hides a trait impl from diagnostic suggestions.
+
+### ABI, Linking, Symbols, and FFI
+- `link` — Specifies a native library to link with an `extern` block.
+- `link_name` — Specifies the symbol name for extern functions or statics.
+- `repr` — Controls type layout.
+- `export_name` — Specifies the exported symbol name.
+- `link_section` — Specifies the object file section.
+- `no_mangle` — Disables symbol name encoding.
+
+### Code Generation
+- [`inline`](/attributes/diagnostics-and-codegen) — Hint to inline code.
+- [`cold`](/attributes/diagnostics-and-codegen) — Hint that a function is unlikely to be called.
+- `naked` — Prevents a function prologue and epilogue.
+- [`target_feature`](/attributes/diagnostics-and-codegen) — Platform-specific code generation.
+- [`track_caller`](/attributes/diagnostics-and-codegen) — Pass the parent call location to `Location::caller()`.
+
+### Limits
+- [`recursion_limit`](/attributes/type-system-and-debugger) — Sets the maximum recursion depth.
+- [`type_length_limit`](/attributes/type-system-and-debugger) — Sets the maximum type substitution count.
+
+### Type System
+- [`non_exhaustive`](/attributes/type-system-and-debugger) — Indicates a type may gain more fields/variants.
+- `repr` — Controls memory representation.
+
+### Debugger
+- [`debugger_visualizer`](/attributes/type-system-and-debugger) — Embeds a Natvis or GDB script file.
+- `collapse_debuginfo` — Controls how macro invocations appear in debuginfo.
+
+### Other
+- `doc` — Attaches documentation.
+- `no_std` — Removes `std` from the prelude.
+- `no_implicit_prelude` — Disables prelude lookups in a module.
+- `path` — Specifies the filename for a module.
+- `panic_handler` — Sets the function to handle panics.
+- `global_allocator` — Sets the global memory allocator.
+
+## Sub-Pages
+
+<CardGroup cols={2}>
+  <Card title="Testing & Derive" href="/attributes/testing-and-derive">
+    `#[test]`, `#[ignore]`, `#[should_panic]`, and `#[derive]`
+  </Card>
+  <Card title="Diagnostics & Codegen" href="/attributes/diagnostics-and-codegen">
+    Lint attributes, `#[deprecated]`, `#[must_use]`, `#[inline]`, `#[target_feature]`, `#[cfg]`
+  </Card>
+  <Card title="Type System & Debugger" href="/attributes/type-system-and-debugger">
+    `#[non_exhaustive]`, `#[repr]`, limit attributes, and `#[debugger_visualizer]`
+  </Card>
+</CardGroup>

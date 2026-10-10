@@ -1,0 +1,150 @@
+---
+title: "Keywords and Identifiers in Rust"
+sidebarTitle: "Keywords & Identifiers"
+description: "A complete reference to Rust's strict, reserved, and weak keywords, raw identifiers, Unicode identifier rules, and NFC normalization."
+---
+
+Rust divides its reserved words into three categories — strict keywords, reserved keywords, and weak keywords — each with different rules about where they can appear. Alongside keywords, identifiers name variables, functions, types, and every other user-defined entity in a program. This chapter covers both, including the `r#` raw identifier syntax that allows keywords to be used as identifiers when necessary.
+
+## Keywords
+
+<Tabs>
+  <Tab title="Strict Keywords">
+    Strict keywords can **only** be used in their correct syntactic contexts. They cannot be used as the names of items, variables, function parameters, fields, enum variants, type parameters, lifetime parameters, loop labels, macros, attributes, macro placeholders, or crates.
+
+    ```
+    _       as      async   await   break
+    const   continue crate  dyn     else
+    enum    extern  false   fn      for
+    if      impl    in      let     loop
+    match   mod     move    mut     pub
+    ref     return  self    Self    static
+    struct  super   trait   true    type
+    unsafe  use     where   while
+    ```
+
+    <Note>
+      The following keywords were added as strict keywords in the **2018 edition**:
+      - `async`
+      - `await`
+      - `dyn`
+    </Note>
+  </Tab>
+  <Tab title="Reserved Keywords">
+    Reserved keywords are not used yet, but they are reserved for future use and carry the same restrictions as strict keywords. This keeps current Rust programs forward-compatible with future language versions.
+
+    ```
+    abstract  become  box    do      final
+    gen       macro   override priv  try
+    typeof    unsized virtual  yield
+    ```
+
+    <Note>
+      The `try` keyword was added as a reserved keyword in the **2018 edition**.
+      The `gen` keyword was added as a reserved keyword in the **2024 edition**.
+    </Note>
+  </Tab>
+  <Tab title="Weak Keywords">
+    Weak keywords have special meaning only in certain contexts. Outside those contexts they can be used freely as regular identifiers — for example, you can declare a variable or method named `union`.
+
+    | Keyword | Context |
+    |---|---|
+    | `macro_rules` | Used to define declarative macros |
+    | `union` | Used to declare a union type; only a keyword in a union declaration |
+    | `'static` | The static lifetime; cannot be used as a generic lifetime parameter or loop label |
+    | `safe` | Used for functions and statics in external blocks |
+    | `raw` | Used for raw borrow operators (`&raw const` / `&raw mut`); only a keyword when matching that form |
+
+    The `'static` lifetime restriction is enforced at compile time:
+
+    ```rust,compile_fail
+    // error[E0262]: invalid lifetime parameter name: `'static`
+    fn invalid_lifetime_parameter<'static>(s: &'static str) -> &'static str { s }
+    ```
+
+    <Note>
+      In the **2015 edition**, `dyn` behaves as a keyword when used in a type position followed by certain syntax. Beginning in the **2018 edition**, `dyn` was promoted to a strict keyword.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Identifiers
+
+Identifiers in Rust follow the specification in [Unicode Standard Annex #31](https://www.unicode.org/reports/tr31/tr31-43.html) for Unicode version 17.0. The grammar is:
+
+```
+IDENTIFIER_OR_KEYWORD -> ( XID_Start | `_` ) XID_Continue*
+RAW_IDENTIFIER        -> `r#` IDENTIFIER_OR_KEYWORD
+NON_KEYWORD_IDENTIFIER -> IDENTIFIER_OR_KEYWORD
+                          except a strict or reserved keyword
+IDENTIFIER            -> NON_KEYWORD_IDENTIFIER | RAW_IDENTIFIER
+```
+
+The Unicode profile used is:
+- **Start**: `XID_Start` characters, plus the underscore `_` (U+005F)
+- **Continue**: `XID_Continue` characters
+- **Medial**: empty (no medial characters)
+
+Some valid identifiers:
+
+```rust
+let foo = 1;
+let _identifier = 2;
+let Москва = "Moscow";
+let 東京 = "Tokyo";
+```
+
+<Note>
+  Identifiers starting with an underscore (`_`) conventionally indicate an intentionally unused binding. The Rust compiler (`rustc`) suppresses unused-variable warnings for such identifiers.
+</Note>
+
+### Restrictions
+
+- Identifiers may not be a strict or reserved keyword without the `r#` prefix.
+- The zero-width non-joiner (ZWNJ, U+200C) and zero-width joiner (ZWJ, U+200D) characters are **not** allowed in identifiers.
+
+### ASCII-Only Contexts
+
+Identifiers are restricted to the ASCII subset of `XID_Start` and `XID_Continue` in the following situations:
+
+- `extern crate` declarations (except the `as` clause identifier)
+- External crate names referenced in a path
+- Module names loaded from the filesystem without a `#[path]` attribute
+- Items with `#[no_mangle]`
+- Item names in external blocks (`extern { ... }`)
+
+## Normalization
+
+Identifiers are normalized using **Normalization Form C (NFC)** as defined in [Unicode Standard Annex #15](https://www.unicode.org/reports/tr15/tr15-57.html). Two identifiers are considered equal if their NFC forms are equal. Both procedural and declarative macros receive NFC-normalized identifiers in their input.
+
+## Raw Identifiers
+
+A raw identifier is a normal identifier prefixed with `r#`. The `r#` prefix is **not** part of the actual identifier name — it is only present in the source text to escape the keyword restriction.
+
+```rust
+// Using `match` as a variable name via raw identifier syntax
+let r#match = 42;
+println!("{}", r#match);
+
+// Using `type` as a field name
+struct Foo {
+    r#type: String,
+}
+```
+
+Unlike normal identifiers, a raw identifier may be any strict or reserved keyword **except** the following, which are permanently forbidden as raw identifiers:
+
+- `_`
+- `crate`
+- `self`
+- `Self`
+- `super`
+
+```rust
+let r#true = "overriding true";   // OK: `true` is a strict keyword but allowed as raw identifier
+let r#async = "async value";      // OK: `async` is a strict keyword but allowed as raw identifier
+```
+
+<Warning>
+  It is an error to use a `RESERVED_RAW_IDENTIFIER` token — that is, `r#` followed by `_`, `crate`, `self`, `Self`, or `super`.
+</Warning>

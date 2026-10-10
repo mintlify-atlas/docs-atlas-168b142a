@@ -1,0 +1,71 @@
+---
+title: "Notation and Grammar Conventions in the Rust Reference"
+sidebarTitle: "Notation"
+description: "A complete guide to the grammar notation used throughout the Rust Reference, including lexer rules, string table productions, and syntax diagrams."
+---
+
+The Rust Reference uses a consistent formal notation throughout its grammar snippets to precisely describe both the lexical structure (how source text is tokenized) and the syntactic structure (how tokens are assembled into programs) of the language. Understanding this notation is essential for reading any grammar block in the reference.
+
+## Grammar Notation
+
+The following notations are used by the *Lexer* and *Syntax* grammar snippets:
+
+| Notation | Examples | Meaning |
+|---|---|---|
+| `CAPITAL` | `KW_IF`, `INTEGER_LITERAL` | A token produced by the lexer |
+| *ItalicCamelCase* | *LetStatement*, *Item* | A syntactical production |
+| `` `string` `` | `` `x` ``, `` `while` ``, `` `*` `` | The exact character(s) |
+| x<sup>?</sup> | `` `pub` ``<sup>?</sup> | An optional item |
+| x<sup>\*</sup> | *OuterAttribute*<sup>\*</sup> | 0 or more of x |
+| x<sup>+</sup> | *MacroMatch*<sup>+</sup> | 1 or more of x |
+| x<sup>a..b</sup> | `HEX_DIGIT`<sup>1..6</sup> | a to b repetitions of x, exclusive of b |
+| x<sup>a..=b</sup> | `HEX_DIGIT`<sup>1..=5</sup> | a to b repetitions of x, inclusive of b |
+| x<sup>n:a..=b</sup> | `` `#` ``<sup>n:1..=255</sup> | a to b repetitions of x (inclusive), count bound to name n |
+| x<sup>n</sup> | `` `#` ``<sup>n</sup> | x repeated the number of times bound to n by a previous labeled repetition |
+| Rule1 Rule2 | `` `fn` `` *Name* *Parameters* | Sequence of rules in order |
+| `\|` | `` `u8` \| `u16` ``, Block \| Item | Either one or another |
+| `!` | `!COMMENT` | Matches if the expression does **not** follow, without consuming any input |
+| `[ ]` | `` [`b` `B`] `` | Any of the characters listed |
+| `[ - ]` | `` [`a`-`z`] `` | Any of the characters in the range |
+| `~[ ]` | `` ~[`b` `B`] `` | Any characters, **except** those listed |
+| `` ~`string` `` | `` ~`\n` ``, `` ~`*/` `` | Any characters, except this sequence |
+| `( )` | (`,` *Parameter*)<sup>?</sup> | Groups items |
+| `^` | `` `b'` ^ ASCII_FOR_CHAR `` | Hard cut — the rest of the sequence must match or parsing fails unconditionally |
+| `U+xxxx..xxxxxx` | `U+0060` | A single Unicode character |
+| `<text>` | `<any ASCII char except CR>` | An English description of what should be matched |
+| Rule <sub>suffix</sub> | `IDENTIFIER_OR_KEYWORD` <sub>*except `crate`*</sub> | A modification to the previous rule |
+| `// Comment.` | `// Single line comment.` | A comment extending to the end of the line |
+
+Sequences have higher precedence than `|` alternation.
+
+## The Hard Cut Operator
+
+The grammar uses *ordered alternation*: the parser tries alternatives left to right and takes the first that matches. If an alternative fails partway through a sequence, the parser normally backtracks and tries the next alternative. The cut operator (`^`) prevents this. Once every expression to the left of `^` in a sequence has matched, the rest of the sequence must match or parsing fails unconditionally.
+
+This is known as a *hard cut* — it prevents all backtracking past the cut point, making failure definitive. (A *soft cut*, by contrast, only prevents backtracking within the immediately enclosing ordered choice.)
+
+<Note>
+  The hard cut operator is necessary because some Rust tokens begin with a prefix that is itself a valid token. For example, `c"` begins a C string literal, but `c` alone is a valid identifier. Without the cut, if `c"\0"` failed to lex as a C string literal (because null bytes are not allowed in C strings), the parser could backtrack and lex it as two tokens: the identifier `c` and the string `"\0"`. The cut after `c"` prevents this — once the opening delimiter is recognized, the parser cannot go back. The same reasoning applies to byte literals, byte string literals, raw string literals, and other literals with prefixes that are themselves valid tokens.
+</Note>
+
+## String Table Productions
+
+Some rules in the grammar — notably unary operators, binary operators, and keywords — are given in a simplified form: as a listing of printable strings. These form a subset of the rules regarding the [token](https://doc.rust-lang.org/reference/tokens.html) rule, and are assumed to be the result of a lexical-analysis phase feeding the parser, driven by a DFA (Deterministic Finite Automaton), operating over the disjunction of all such string table entries.
+
+When such a string in `monospace` font appears inside a grammar block, it is an implicit reference to a single member of such a string table production.
+
+## Grammar Visualizations
+
+Below each grammar block in the reference is a button to toggle the display of a [syntax diagram](https://en.wikipedia.org/wiki/Syntax_diagram). In these diagrams:
+
+- A **square element** is a non-terminal rule.
+- A **rounded rectangle** is a terminal.
+
+## Nonterminals
+
+Grammar nonterminals appear in two forms:
+
+- `CAPITAL_WITH_UNDERSCORES` — tokens produced by the lexer (e.g., `INTEGER_LITERAL`, `IDENTIFIER`)
+- *ItalicCamelCase* — syntactical productions built from tokens (e.g., *LetStatement*, *FunctionItem*)
+
+Nonterminals defined with `@root` are top-level entry points for the lexer or parser.

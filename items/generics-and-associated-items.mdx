@@ -1,0 +1,320 @@
+---
+title: "Generic Parameters and Associated Items in Rust"
+sidebarTitle: "Generics & Associated"
+description: "Type parameters, lifetime parameters, const generics, where clauses, associated types, associated constants, and associated functions in Rust."
+---
+
+Generics and associated items are Rust's mechanisms for writing code that is abstract over types, lifetimes, and constant values. Generic parameters allow functions, types, and traits to work with many different concrete types while still being fully type-checked at compile time. Associated items tie functions, types, and constants directly to a trait or implementing type, making the relationship explicit and enabling powerful abstraction patterns.
+
+## Generic parameters
+
+Functions, type aliases, structs, enumerations, unions, traits, and implementations may be _parameterized_ by types, constants, and lifetimes. These parameters are listed in angle brackets (`<...>`), usually immediately after the name of the item (and directly after `impl` for implementations, which have no name).
+
+```rust
+fn foo<'a, T>() {}
+trait A<U> {}
+struct Ref<'a, T> where T: 'a { r: &'a T }
+struct InnerArray<T, const N: usize>([T; N]);
+struct EitherOrderWorks<const N: bool, U>(U);
+```
+
+The order of generic parameters is restricted to lifetime parameters first, followed by type and const parameters intermixed. The same parameter name may not be declared more than once in a generic parameter list.
+
+### Type parameters
+
+Type parameters are the most common form of generics. Each type parameter is a placeholder for a concrete type supplied at the call site or inferred by the compiler. Type parameters can have trait bounds that restrict which types are valid:
+
+```rust
+use std::fmt::Debug;
+
+fn print_value<T: Debug>(value: T) {
+    println!("{:?}", value);
+}
+
+// Calling with different types
+print_value(42);
+print_value("hello");
+print_value(vec![1, 2, 3]);
+```
+
+### Lifetime parameters
+
+Lifetime parameters describe how long references are valid. They are named with a leading `'` (e.g., `'a`, `'b`):
+
+```rust
+struct Important<'a> {
+    content: &'a str,
+}
+
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() { x } else { y }
+}
+```
+
+<Note>
+`'_` and `'static` are not valid lifetime parameter names — they have special meanings and cannot be declared as parameters.
+</Note>
+
+## Const generics
+
+_Const generic parameters_ allow items to be generic over constant values. The const identifier introduces a name in the value namespace for the constant parameter, and all instances of the item must be instantiated with a value of the given type.
+
+The allowed types of const parameters are: `u8`, `u16`, `u32`, `u64`, `u128`, `usize`, `i8`, `i16`, `i32`, `i64`, `i128`, `isize`, `char`, and `bool`.
+
+```rust
+// Used in the signature of the item itself.
+fn foo<const N: usize>(arr: [i32; N]) {
+    // Used as a type within a function body.
+    let x: [i32; N];
+    // Used as an expression.
+    println!("{}", N * 2);
+}
+
+// Used as a field of a struct.
+struct Foo<const N: usize>([i32; N]);
+
+impl<const N: usize> Foo<N> {
+    // Used as an associated constant.
+    const CONST: usize = N * 4;
+}
+```
+
+### Const arguments
+
+A const argument in a path specifies the const value to use for that item. The argument must be a const expression of the type ascribed to the const parameter. The expression must be a block expression (surrounded with braces) unless it is a single path segment or a literal:
+
+```rust
+struct S<const N: i64>;
+const C: i64 = 1;
+fn f<const N: i64>() -> S<N> { S }
+
+let _ = f::<1>();           // Literal
+let _ = f::<-1>();          // Negative literal
+let _ = f::<{ 1 + 2 }>();  // Constant expression
+let _ = f::<C>();           // Single segment path
+let _ = f::<{ C + 1 }>();  // Constant expression
+let _: S<1> = f::<_>();    // Inferred const
+```
+
+## Where clauses
+
+_Where clauses_ provide another way to specify bounds on type and lifetime parameters, and also allow specifying bounds on types that aren't type parameters. They come after the item definition, introduced with the `where` keyword:
+
+```rust
+struct A<T>
+where
+    T: Iterator,            // Could use A<T: Iterator> instead
+    T::Item: Copy,          // Bound on an associated type
+    String: PartialEq<T>,   // Bound on `String`, using the type parameter
+    i32: Default,           // Allowed, but not useful
+{
+    f: T,
+}
+```
+
+The `for` keyword can be used in where clauses to introduce higher-ranked lifetimes:
+
+```rust
+fn call_with_ref<F>(f: F)
+where
+    F: for<'a> Fn(&'a str),
+{
+    f("hello");
+}
+```
+
+<Tip>
+Where clauses are particularly useful when bounds are complex, involve associated types, or when the same bound would need to be repeated in multiple places. They also allow bounds on types that are not themselves parameters (like `String: PartialEq<T>`).
+</Tip>
+
+## Associated functions and methods
+
+_Associated functions_ are functions associated with a type. An associated function declaration in a trait declares a signature; an associated function definition provides the implementation. A common example is an associated function named `new`:
+
+```rust
+struct Struct {
+    field: i32,
+}
+
+impl Struct {
+    fn new() -> Struct {
+        Struct { field: 0i32 }
+    }
+}
+
+fn main() {
+    let _struct = Struct::new();
+}
+```
+
+When an associated function is declared on a trait, it can also be called with a fully qualified path:
+
+```rust
+trait Num {
+    fn from_i32(n: i32) -> Self;
+}
+
+impl Num for f64 {
+    fn from_i32(n: i32) -> f64 { n as f64 }
+}
+
+// These 4 are all equivalent:
+let _: f64 = Num::from_i32(42);
+let _: f64 = <_ as Num>::from_i32(42);
+let _: f64 = <f64 as Num>::from_i32(42);
+let _: f64 = f64::from_i32(42);
+```
+
+### Methods
+
+Associated functions whose first parameter is named `self` are called _methods_ and may be invoked using the method call operator (e.g., `x.foo()`). The type of the `self` parameter determines how `self` is accessed:
+
+```rust
+# use std::rc::Rc;
+# use std::sync::Arc;
+# use std::pin::Pin;
+struct Example;
+type Alias = Example;
+
+impl Example {
+    fn by_value(self: Self) {}
+    fn by_ref(self: &Self) {}
+    fn by_ref_mut(self: &mut Self) {}
+    fn by_box(self: Box<Self>) {}
+    fn by_rc(self: Rc<Self>) {}
+    fn by_arc(self: Arc<Self>) {}
+    fn by_pin(self: Pin<&Self>) {}
+    fn with_lifetime<'a>(self: &'a Self) {}
+}
+```
+
+Shorthand syntax is available without specifying the type:
+
+| Shorthand | Equivalent |
+|---|---|
+| `self` | `self: Self` |
+| `&'lifetime self` | `self: &'lifetime Self` |
+| `&'lifetime mut self` | `self: &'lifetime mut Self` |
+
+## Associated types
+
+_Associated types_ are type aliases associated with another type. They are declared inside a trait and defined in the trait's implementation. Associated types cannot be defined in inherent implementations.
+
+```rust
+trait AssociatedType {
+    // Associated type declaration
+    type Assoc;
+}
+
+struct Struct;
+struct OtherStruct;
+
+impl AssociatedType for Struct {
+    // Associated type definition
+    type Assoc = OtherStruct;
+}
+
+impl OtherStruct {
+    fn new() -> OtherStruct { OtherStruct }
+}
+
+fn main() {
+    let _other_struct: OtherStruct = <Struct as AssociatedType>::Assoc::new();
+}
+```
+
+A practical example with the `Container` trait:
+
+```rust
+trait Container {
+    type E;
+    fn empty() -> Self;
+    fn insert(&mut self, elem: Self::E);
+}
+
+impl<T> Container for Vec<T> {
+    type E = T;
+    fn empty() -> Vec<T> { Vec::new() }
+    fn insert(&mut self, x: T) { self.push(x); }
+}
+```
+
+### Generic associated types (GATs)
+
+Associated types may include generic parameters and where clauses — these are called _generic associated types_:
+
+```rust
+struct ArrayLender<'a, T>(&'a mut [T; 16]);
+
+trait Lend {
+    type Lender<'a> where Self: 'a;
+    fn lend<'a>(&'a mut self) -> Self::Lender<'a>;
+}
+
+impl<T> Lend for [T; 16] {
+    type Lender<'a> = ArrayLender<'a, T> where Self: 'a;
+
+    fn lend<'a>(&'a mut self) -> Self::Lender<'a> {
+        ArrayLender(self)
+    }
+}
+```
+
+## Associated constants
+
+_Associated constants_ are constants associated with a type. An associated constant declaration declares a signature; an associated constant definition provides the value.
+
+Associated constant definitions undergo constant evaluation only when referenced, and definitions including generic parameters are evaluated after monomorphization:
+
+```rust
+trait ConstantId {
+    const ID: i32;
+}
+
+struct Struct;
+
+impl ConstantId for Struct {
+    const ID: i32 = 1;
+}
+
+fn main() {
+    assert_eq!(1, Struct::ID);
+}
+```
+
+### Default values for associated constants
+
+Traits can provide default values for associated constants that implementors may override:
+
+```rust
+trait ConstantIdDefault {
+    const ID: i32 = 1;
+}
+
+struct Struct;
+struct OtherStruct;
+
+impl ConstantIdDefault for Struct {}
+
+impl ConstantIdDefault for OtherStruct {
+    const ID: i32 = 5;
+}
+
+fn main() {
+    assert_eq!(1, Struct::ID);
+    assert_eq!(5, OtherStruct::ID);
+}
+```
+
+## Default type parameters
+
+Type parameters can specify a default type using `=`:
+
+```rust
+struct MyMap<K, V, S = std::collections::hash_map::RandomState> {
+    // ...
+    _marker: std::marker::PhantomData<(K, V, S)>,
+}
+```
+
+When the generic parameter is not specified, the default is used. Default type parameters are particularly common for implementing data structures where the hashing or allocator strategy can vary but has a sensible default.

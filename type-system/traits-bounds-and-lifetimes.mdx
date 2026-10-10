@@ -1,0 +1,298 @@
+---
+title: "Trait Bounds, Subtyping, and Lifetime Elision in Rust"
+sidebarTitle: "Bounds & Lifetimes"
+description: "Reference for Rust trait bound syntax, where clauses, higher-ranked bounds (for<'a>), subtyping, variance, lifetime elision rules, and divergence."
+---
+
+Trait bounds, subtyping, and lifetime elision work together to give Rust's type system its expressiveness while keeping most code free from verbose lifetime annotations. This page covers bound syntax, where clauses, higher-ranked trait bounds, variance, the three lifetime elision rules, and divergence.
+
+---
+
+## Trait Bounds
+
+Trait and lifetime bounds restrict which types and lifetimes may be used as generic parameters. Bounds can be provided directly on a generic parameter or in a `where` clause.
+
+### Basic Bound Syntax
+
+```rust
+// Bound directly on the parameter
+fn print_it<T: std::fmt::Display>(value: T) {
+    println!("{}", value);
+}
+
+// Equivalent using where clause
+fn print_it_where<T>(value: T) where T: std::fmt::Display {
+    println!("{}", value);
+}
+```
+
+Multiple bounds are combined with `+`:
+
+```rust
+fn print_and_clone<T: std::fmt::Debug + Clone>(value: T) {
+    let cloned = value.clone();
+    println!("{:?}", cloned);
+}
+```
+
+Bounds in trait declarations create supertraits:
+
+```rust
+# type Surface = i32;
+trait Shape {
+    fn draw(&self, surface: Surface);
+    fn name() -> &'static str;
+}
+
+fn draw_twice<T: Shape>(surface: Surface, sh: T) {
+    sh.draw(surface);
+    sh.draw(surface);
+}
+
+fn copy_and_draw_twice<T: Copy>(surface: Surface, sh: T) where T: Shape {
+    let shape_copy = sh;   // doesn't move sh because T: Copy
+    draw_twice(surface, sh);
+}
+```
+
+### `?Sized`
+
+The `?Sized` bound relaxes the implicit `Sized` bound that all type parameters have by default. It is the only use of `?` in bounds:
+
+```rust
+// T can be a DST (like [u8] or str)
+fn print_bytes<T: ?Sized + std::fmt::Debug>(value: &T) {
+    println!("{:?}", value);
+}
+```
+
+Without `?Sized`, generic parameters must be `Sized`, meaning you cannot use them with DSTs.
+
+### Lifetime Bounds
+
+Lifetime bounds restrict how long a type's data must live:
+
+- `T: 'a` means all lifetime parameters of `T` outlive `'a`.
+- `'a: 'b` means `'a` outlives `'b` (i.e., `'a` lasts at least as long as `'b`).
+
+```rust
+fn f<'a, 'b>(x: &'a i32, mut y: &'b i32) where 'a: 'b {
+    y = x;  // &'a i32 is a subtype of &'b i32 because 'a: 'b
+}
+```
+
+### `where` Clauses
+
+`where` clauses allow more expressive bounds and are required when bounds involve associated types or complex expressions:
+
+```rust
+use std::fmt::Display;
+
+fn largest_display<T>(list: &[T]) -> &T
+where
+    T: PartialOrd + Display,
+{
+    let mut largest = &list[0];
+    for item in list.iter() {
+        if item > largest {
+            largest = item;
+        }
+    }
+    largest
+}
+```
+
+### Implied Bounds
+
+Lifetime bounds required for types to be well-formed are sometimes inferred automatically. For example, `fn f<'a, T>(x: &'a T)` implicitly requires `T: 'a` because `&'a T` is only valid if `T` outlives `'a`:
+
+```rust
+fn requires_t_outlives_a<'a, T>(x: &'a T) {}
+// Implicitly, T: 'a is required and can be used inside the function body
+```
+
+---
+
+## Higher-Ranked Trait Bounds
+
+Higher-ranked trait bounds specify that a bound holds for *all* lifetimes, not just a specific one. They use `for<'a>` syntax:
+
+```rust
+fn call_on_ref_zero<F>(f: F) where for<'a> F: Fn(&'a i32) {
+    let zero = 0;
+    f(&zero);
+}
+```
+
+The `for<'a>` can also be placed just before the trait name (with the same meaning, but narrower scope):
+
+```rust
+fn call_on_ref_zero<F>(f: F) where F: for<'a> Fn(&'a i32) {
+    let zero = 0;
+    f(&zero);
+}
+```
+
+Higher-ranked bounds are commonly needed for closures and function pointers that must work with references of any lifetime. They are also found in subtype relationships:
+
+```rust
+// Here 'a is substituted for 'static
+let subtype: &(for<'a> fn(&'a i32) -> &'a i32) = &((|x| x) as fn(&_) -> &_);
+let supertype: &(fn(&'static i32) -> &'static i32) = subtype;
+```
+
+---
+
+## Subtyping and Variance
+
+Subtyping in Rust is restricted to two cases: variance with respect to lifetimes, and subtyping between types with higher-ranked lifetimes. If lifetimes were erased, there would be no subtyping other than type equality.
+
+### Lifetime Subtyping
+
+A longer lifetime is a subtype of a shorter one. `'static` outlives every other lifetime, so `&'static str` is a subtype of `&'a str` for any `'a`:
+
+```rust
+fn bar<'a>() {
+    let s: &'static str = "hi";
+    let t: &'a str = s;  // OK: 'static is a subtype of 'a
+}
+```
+
+### Variance
+
+*Variance* describes how subtyping of a type parameter relates to subtyping of the generic type. The three kinds are:
+
+- **Covariant**: `F<T>` is a subtype of `F<U>` when `T` is a subtype of `U`. Subtyping "passes through."
+- **Contravariant**: `F<U>` is a subtype of `F<T>` when `T` is a subtype of `U`. Subtyping is reversed.
+- **Invariant**: No subtyping relationship can be derived between `F<T>` and `F<U>` regardless of the relationship between `T` and `U`.
+
+| Type | Variance in `'a` | Variance in `T` |
+|------|-----------------|-----------------|
+| `&'a T` | covariant | covariant |
+| `&'a mut T` | covariant | **invariant** |
+| `*const T` | — | covariant |
+| `*mut T` | — | **invariant** |
+| `[T]` and `[T; n]` | — | covariant |
+| `fn() -> T` | — | covariant |
+| `fn(T) -> ()` | — | **contravariant** |
+| `std::cell::UnsafeCell<T>` | — | **invariant** |
+| `std::marker::PhantomData<T>` | — | covariant |
+| `dyn Trait<T> + 'a` | covariant | **invariant** |
+
+The invariance of `&mut T` over `T` is the reason you cannot coerce `&mut &'static str` to `&mut &'a str`: if you could, you could replace the `'static` reference with a shorter-lived one through the mutable reference.
+
+The variance of user-defined structs, enums, and unions is computed from the variances of their field types. If a parameter appears in positions with conflicting variances, it becomes invariant:
+
+```rust
+use std::cell::UnsafeCell;
+struct Variance<'a, 'b, 'c, T, U: 'a> {
+    x: &'a U,               // covariant in 'a, would be covariant in U
+    y: *const T,            // covariant in T
+    z: UnsafeCell<&'b f64>, // invariant in 'b
+    w: *mut U,              // invariant in U (overrides the covariant x)
+    f: fn(&'c ()) -> &'c () // both co- and contravariant, makes 'c invariant
+}
+```
+
+---
+
+## Lifetime Elision
+
+Rust has rules that allow lifetimes to be elided (omitted) where the compiler can infer a sensible default.
+
+### Lifetime Elision in Functions
+
+In function item, function pointer, and closure trait signatures, the following rules apply:
+
+1. **Each elided lifetime in the parameters becomes a distinct lifetime parameter.**
+2. **If there is exactly one lifetime used in the parameters (elided or not), that lifetime is assigned to all elided output lifetimes.**
+3. **In method signatures, if the receiver has type `&Self` or `&mut Self`, the lifetime of that reference is assigned to all elided output lifetime parameters.**
+
+```rust
+# trait T {}
+# trait ToCStr {}
+# struct Thing<'a> {f: &'a i32}
+# struct Command;
+# trait Example {
+fn print1(s: &str);                                   // elided
+fn print3<'a>(s: &'a str);                            // expanded
+
+fn substr1(s: &str, until: usize) -> &str;            // elided (rule 2)
+fn substr2<'a>(s: &'a str, until: usize) -> &'a str;  // expanded
+
+fn get_mut1(&mut self) -> &mut dyn T;                 // elided (rule 3)
+fn get_mut2<'a>(&'a mut self) -> &'a mut dyn T;       // expanded
+# }
+```
+
+When elision cannot apply (e.g., multiple input lifetimes with no `self`), the lifetime must be written explicitly:
+
+```rust,compile_fail
+# trait Example {
+// Cannot infer — there are no parameters to infer from
+fn get_str() -> &str;                    // ILLEGAL
+
+// Cannot infer — ambiguous which input lifetime to use
+fn frob(s: &str, t: &str) -> &str;      // ILLEGAL
+# }
+```
+
+### Default Trait Object Lifetimes
+
+Trait objects (`dyn Trait`) have a *default object lifetime bound* that is inferred based on context:
+
+- For `Box<dyn Foo>`, the default is `'static`.
+- For `&'a dyn Foo`, the default is `'a`.
+- For `&'a mut dyn Foo`, the default is `'a`.
+- When used in a generic type parameter position, the containing type's constraints are consulted first.
+
+```rust
+trait Foo {}
+
+// These two are the same because Box<T> has no lifetime bound on T
+type T1 = Box<dyn Foo>;
+type T2 = Box<dyn Foo + 'static>;
+
+// These are the same because &'a T requires T: 'a
+type T3<'a> = &'a dyn Foo;
+type T4<'a> = &'a (dyn Foo + 'a);
+```
+
+### `const` and `static` Lifetime Elision
+
+Both `const` and `static` declarations of reference types have implicit `'static` lifetimes unless an explicit lifetime is specified:
+
+```rust
+// STRING: &'static str
+const STRING: &str = "bitstring";
+```
+
+---
+
+## Divergence
+
+A *diverging expression* is an expression that never completes normal execution — it either loops forever, panics, returns from the current function, or calls another diverging function.
+
+```rust
+fn diverges() -> ! {
+    panic!("This function never returns!");
+}
+
+fn example() {
+    let x: i32 = diverges(); // This line never completes
+    println!("This is never printed: {x}");
+}
+```
+
+Any expression of type `!` (the never type) is a diverging expression. Expressions of type `!` can be coerced into any type. This is why `panic!()`, `return`, `break`, and `continue` can appear in positions that require a specific type — they have type `!` which coerces to any type.
+
+If a type to be inferred is only unified with diverging expressions, it is inferred to be `!`:
+
+```rust
+// The type of `x` is inferred as `!`
+let x = loop {};  // infinite loop has type `!`
+```
+
+<Note>
+A type being uninhabited (like an empty enum) is not sufficient for it to diverge. The never type `!` is special — only expressions of type `!` are truly diverging.
+</Note>

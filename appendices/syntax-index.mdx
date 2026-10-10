@@ -1,0 +1,325 @@
+---
+title: "Rust Syntax Index: A Quick Reference for Language Constructs"
+sidebarTitle: "Syntax Index"
+description: "A categorized quick-reference for all Rust syntax: statements, items, expressions, patterns, types, attributes, generics, and macros."
+---
+
+This syntax index is a quick-reference for Rust language constructs organized by category. Each entry shows the syntax form and a brief description. For in-depth documentation, follow the cross-references in each section.
+
+## Keywords
+
+| Keyword | Use |
+|---------|-----|
+| `_` | Wildcard pattern, inferred const, inferred type, placeholder lifetime, destructuring assignment |
+| `as` | Type cast expressions, qualified paths, extern crate renaming, use-as |
+| `async` | Async functions, async blocks, async closures |
+| `await` | Await expressions |
+| `break` | Break from loops; optionally carry a value |
+| `const` | Const items, const functions, const generics, const blocks, raw pointer |
+| `continue` | Continue to next loop iteration |
+| `crate` | Extern crate, visibility, crate-relative paths |
+| `dyn` | Trait objects (`dyn Trait`) |
+| `else` | Else branch of `if`; else block of `if let` |
+| `enum` | Enum type definitions |
+| `extern` | Extern crate, extern function qualifier, external blocks |
+| `false` | Boolean literal `false` |
+| `fn` | Function definitions, function pointer types |
+| `for` | Trait implementations (`for Trait`), iterator loops, higher-ranked bounds |
+| `if` | If expressions, if-let patterns |
+| `impl` | Inherent impls, trait impls, `impl Trait` types |
+| `in` | Iterator loop range, visibility, assembly operands |
+| `let` | Let statements, `if let`, `while let` |
+| `loop` | Infinite loop expressions |
+| `macro_rules` | Macros by example |
+| `match` | Match expressions |
+| `mod` | Module definitions |
+| `move` | Move closures, move async blocks |
+| `mut` | Mutable bindings, mutable references, mutable raw pointers |
+| `pub` | Visibility modifier |
+| `ref` | Bind by reference in patterns |
+| `return` | Return expressions |
+| `self` | Method receiver, self paths, visibility |
+| `Self` | Self type path (in traits and impls) |
+| `static` | Static items, `'static` lifetimes |
+| `struct` | Struct type definitions |
+| `super` | Parent module paths, visibility |
+| `trait` | Trait definitions |
+| `true` | Boolean literal `true` |
+| `type` | Type alias definitions, associated type definitions |
+| `union` | Union type definitions |
+| `unsafe` | Unsafe blocks, functions, traits, impls, extern blocks, attributes |
+| `use` | Use declarations (imports) |
+| `where` | Where clauses for bounds |
+| `while` | Predicate loops, `while let` |
+
+## Statements & Items
+
+### Items (crate components)
+
+| Syntax | Description |
+|--------|-------------|
+| `mod ident;` / `mod ident { … }` | Module definition (external file or inline) |
+| `use path;` | Import items into scope |
+| `use path as Name;` | Import with alias |
+| `use path::*;` | Glob import |
+| `fn ident(params) -> Type { … }` | Function definition |
+| `async fn ident(params) -> Type { … }` | Async function |
+| `const fn ident(params) -> Type { … }` | Const function |
+| `extern "ABI" fn ident(params) -> Type` | Extern function qualifier |
+| `type Alias = Type;` | Type alias |
+| `struct Ident { field: Type, … }` | Struct with named fields |
+| `struct Ident(Type, …);` | Tuple struct |
+| `struct Ident;` | Unit struct |
+| `enum Ident { Variant, … }` | Enum definition |
+| `union Ident { field: Type, … }` | Union definition |
+| `trait Ident { … }` | Trait definition |
+| `unsafe trait Ident { … }` | Unsafe trait |
+| `impl Type { … }` | Inherent implementation |
+| `impl Trait for Type { … }` | Trait implementation |
+| `unsafe impl Trait for Type { … }` | Unsafe trait implementation |
+| `const IDENT: Type = expr;` | Constant item |
+| `static IDENT: Type = expr;` | Static item |
+| `static mut IDENT: Type = expr;` | Mutable static item |
+| `unsafe extern "ABI" { … }` | External block (FFI declarations) |
+
+### Statements
+
+| Syntax | Description |
+|--------|-------------|
+| `let ident = expr;` | Immutable variable binding |
+| `let mut ident = expr;` | Mutable variable binding |
+| `let ident: Type = expr;` | Typed binding |
+| `let pattern = expr;` | Destructuring binding |
+| `expr;` | Expression statement (discards value) |
+
+## Expressions
+
+### Control Flow
+
+| Expression | Description |
+|-----------|-------------|
+| `if cond { … } else { … }` | Conditional expression |
+| `if let pattern = expr { … }` | Pattern-matching conditional |
+| `match expr { pattern => expr, … }` | Pattern-matching expression |
+| `loop { … }` | Infinite loop; returns value via `break val` |
+| `while cond { … }` | Predicate loop |
+| `while let pattern = expr { … }` | Pattern-matching predicate loop |
+| `for pattern in expr { … }` | Iterator loop |
+| `break` / `break val` | Exit a loop, optionally with a value |
+| `continue` | Continue to next iteration |
+| `return expr` | Return from a function |
+| `'label: loop { … }` | Labeled loop |
+| `break 'label val` | Break from a labeled loop |
+
+### Operators and Arithmetic
+
+| Expression | Description |
+|-----------|-------------|
+| `a + b`, `a - b`, `a * b`, `a / b`, `a % b` | Arithmetic operators |
+| `a & b`, `a \| b`, `a ^ b` | Bitwise AND, OR, XOR |
+| `!a` | Bitwise/logical NOT |
+| `a << b`, `a >> b` | Shift left, shift right |
+| `a == b`, `a != b`, `a < b`, `a > b`, `a <= b`, `a >= b` | Comparison |
+| `a && b`, `a \|\| b` | Lazy boolean AND, OR |
+| `-a` | Negation |
+| `a = b` | Assignment |
+| `a += b`, `a -= b`, `a *= b`, etc. | Compound assignment |
+| `a as Type` | Type cast |
+| `expr?` | Try (propagate `Err`/`None`) |
+
+### Memory and References
+
+| Expression | Description |
+|-----------|-------------|
+| `&expr` | Shared borrow (reference) |
+| `&mut expr` | Mutable borrow |
+| `&raw const expr` | Raw const borrow (no validity guarantee) |
+| `&raw mut expr` | Raw mut borrow |
+| `*expr` | Dereference |
+
+### Closures
+
+| Syntax | Description |
+|--------|-------------|
+| `\|x, y\| expr` | Closure (inferred types) |
+| `\|x: T, y: U\| -> R { … }` | Closure with explicit types |
+| `move \|x\| expr` | Move closure (captures by value) |
+| `async \|x\| expr` | Async closure |
+
+### Values and Construction
+
+| Expression | Description |
+|-----------|-------------|
+| `()` | Unit value |
+| `(a, b, c)` | Tuple |
+| `(a,)` | Single-element tuple |
+| `[a, b, c]` | Array literal |
+| `[expr; N]` | Repeated array (N copies of expr) |
+| `Struct { field: val, … }` | Struct construction |
+| `Struct { field: val, ..base }` | Struct update syntax |
+| `Tuple(a, b)` | Tuple struct / enum variant construction |
+| `Variant` | Unit enum variant |
+| `{ … }` | Block expression |
+| `unsafe { … }` | Unsafe block |
+| `const { … }` | Const block |
+| `async { … }` | Async block |
+
+### Paths and Access
+
+| Expression | Description |
+|-----------|-------------|
+| `ident::path` | Path expression |
+| `Type::method(…)` | Associated function call |
+| `expr.method(…)` | Method call |
+| `expr.field` | Field access |
+| `expr.0`, `expr.1` | Tuple indexing |
+| `expr[index]` | Slice/array indexing |
+| `path::<Type>(…)` | Turbofish — explicit generic arguments |
+| `(expr)` | Grouped / parenthesized expression |
+
+## Patterns
+
+| Pattern | Description |
+|---------|-------------|
+| `42`, `"str"`, `'a'`, `true` | Literal patterns |
+| `ident` | Identifier binding (by value/move) |
+| `ref ident` | Bind by shared reference |
+| `ref mut ident` | Bind by mutable reference |
+| `mut ident` | Mutable binding |
+| `_` | Wildcard (discard) |
+| `..` | Rest pattern (ignore remaining fields/elements) |
+| `a..b`, `a..=b` | Range patterns |
+| `&pattern`, `&mut pattern` | Reference patterns |
+| `Type { field: pattern, … }` | Struct patterns |
+| `Type { field, .. }` | Struct pattern with shorthand + rest |
+| `Type(pattern, …)` | Tuple struct patterns |
+| `(pattern, …)` | Tuple patterns |
+| `(pattern)` | Grouped pattern |
+| `[pattern, …]` | Slice patterns |
+| `path` | Path patterns (constants, unit variants) |
+| `pat1 \| pat2` | Or patterns |
+| `ident @ pattern` | Binding + pattern (`@`) |
+
+## Types
+
+| Type | Description |
+|------|-------------|
+| `bool`, `u8`, `i32`, `f64`, `str`, `char` | Primitive types |
+| `()` | Unit type |
+| `!` | Never type |
+| `[T; N]` | Array type (fixed size) |
+| `[T]` | Slice type (dynamically sized) |
+| `(T, U, …)` | Tuple type |
+| `&T` | Shared reference |
+| `&mut T` | Mutable reference |
+| `&'a T` | Reference with explicit lifetime |
+| `*const T` | Raw const pointer |
+| `*mut T` | Raw mutable pointer |
+| `fn(T, U) -> R` | Function pointer type |
+| `extern "C" fn(T) -> R` | Extern function pointer type |
+| `impl Trait` | Opaque type (return position) |
+| `dyn Trait` | Trait object (dynamic dispatch) |
+| `T: TraitA + TraitB` | Trait bound |
+| `T: 'a` | Lifetime bound |
+| `T: ?Sized` | Relaxed `Sized` bound |
+| `for<'a> T: Trait<'a>` | Higher-ranked trait bound |
+| `Type<T>` | Generic type application |
+| `Trait<Item = T>` | Associated type binding |
+| `_` | Inferred type |
+
+## Attributes & Macros
+
+### Attributes
+
+| Syntax | Description |
+|--------|-------------|
+| `#[attr]` | Outer attribute (applies to next item) |
+| `#![attr]` | Inner attribute (applies to containing item/crate) |
+| `#[derive(Trait, …)]` | Derive macro |
+| `#[cfg(condition)]` | Conditional compilation |
+| `#[cfg_attr(cond, attr)]` | Conditional attribute |
+| `#[allow(lint)]`, `#[deny(lint)]`, `#[warn(lint)]` | Lint controls |
+| `#[inline]`, `#[inline(always)]`, `#[inline(never)]` | Inlining hints |
+| `#[repr(C)]`, `#[repr(u8)]`, `#[repr(transparent)]` | Representation |
+| `#[unsafe(no_mangle)]` | Disable symbol mangling |
+| `#[unsafe(link_section = "…")]` | Specify output section |
+| `#[unsafe(export_name = "…")]` | Custom export symbol |
+| `#[panic_handler]` | Define the panic handler |
+| `#[global_allocator]` | Select the global allocator |
+| `#[used]` | Keep static in object file |
+| `#[link(name = "…")]` | Link to native library |
+| `#[must_use]` | Warn if return value is ignored |
+| `#[deprecated]` | Mark item as deprecated |
+| `#[doc = "…"]` / `///` | Documentation comment |
+
+### Macros
+
+| Syntax | Description |
+|--------|-------------|
+| `ident!(…)` / `ident!{…}` / `ident![…]` | Macro invocation |
+| `macro_rules! name { … }` | Declarative macro definition |
+| `$ident` | Macro metavariable |
+| `$ident:kind` | Macro fragment specifier |
+| `$(…)*`, `$(…)+`, `$(…)?` | Macro repetition |
+
+Common built-in macros:
+
+| Macro | Description |
+|-------|-------------|
+| `println!(…)` / `print!(…)` | Print to stdout |
+| `eprintln!(…)` / `eprint!(…)` | Print to stderr |
+| `format!(…)` | Format to `String` |
+| `panic!(…)` | Unconditional panic |
+| `assert!(cond)` / `assert_eq!(a, b)` | Assertions |
+| `vec![…]` | Create a `Vec` |
+| `todo!()` / `unimplemented!()` | Placeholder panics |
+| `unreachable!()` | Mark code as unreachable |
+| `include_str!(…)` / `include_bytes!(…)` | Include file contents |
+| `concat!(…)` | Concatenate string literals |
+| `cfg!(…)` | Boolean version of `#[cfg]` |
+| `asm!(…)` / `global_asm!(…)` | Inline assembly |
+
+## Generics & Lifetimes
+
+| Syntax | Description |
+|--------|-------------|
+| `fn f<T>(x: T)` | Generic function (type parameter `T`) |
+| `struct S<T> { … }` | Generic struct |
+| `impl<T> Trait for S<T>` | Generic implementation |
+| `fn f<T: Clone>(x: T)` | Type parameter with bound |
+| `fn f<T>(x: T) where T: Clone + Debug` | Where clause bounds |
+| `fn f<'a>(x: &'a str) -> &'a str` | Explicit lifetime parameter |
+| `fn f(x: &str) -> &str` | Lifetime elision (implicit lifetimes) |
+| `fn f<const N: usize>(arr: [i32; N])` | Const generic parameter |
+| `for<'a> T: Fn(&'a str)` | Higher-ranked lifetime |
+| `impl Trait` (parameter) | Anonymous type parameter |
+| `-> impl Trait` (return) | Opaque return type |
+| `'static` | Special "lives for the whole program" lifetime |
+| `'_` | Anonymous/inferred lifetime |
+
+## Comments
+
+| Syntax | Description |
+|--------|-------------|
+| `// text` | Line comment |
+| `//! text` | Inner line doc comment (documents parent item) |
+| `/// text` | Outer line doc comment (documents next item) |
+| `/* text */` | Block comment |
+| `/*! text */` | Inner block doc comment |
+| `/** text */` | Outer block doc comment |
+
+## Tokens and Literals
+
+| Token | Description |
+|-------|-------------|
+| `42`, `42u8`, `0xff`, `0b1010`, `0o77` | Integer literals |
+| `3.14`, `3.14f64` | Float literals |
+| `'a'`, `'\n'`, `'\u{1F600}'` | Character literals |
+| `b'a'` | Byte literal |
+| `"hello"` | String literal |
+| `r"raw"`, `r#"raw with "quotes""#` | Raw string literals |
+| `b"bytes"` | Byte string literal |
+| `c"c string"` | C string literal (null-terminated) |
+| `'lifetime` | Lifetime or loop label |
+| `ident` | Identifier |
+| `r#ident` | Raw identifier (use reserved keywords as names) |

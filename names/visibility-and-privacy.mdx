@@ -1,0 +1,259 @@
+---
+title: "Visibility and Privacy in Rust Modules"
+sidebarTitle: "Visibility"
+description: "How Rust's visibility system works: pub, pub(crate), pub(super), pub(in path), private by default, re-exports with pub use, and struct field visibility."
+---
+
+Rust's visibility system controls which items can be accessed from which locations in a crate or from external crates. Every item declaration carries a visibility specifier that determines the boundary of access. Getting visibility right is fundamental to designing clean module APIs while keeping implementation details hidden.
+
+## Visibility Syntax
+
+```
+Visibility ->
+      `pub`
+    | `pub` `(` `crate` `)`
+    | `pub` `(` `self` `)`
+    | `pub` `(` `super` `)`
+    | `pub` `(` `in` SimplePath `)`
+```
+
+## The Default: Private
+
+By default, every item is _private_ — visible only to the current module and its descendants. This is the most restrictive visibility level.
+
+```rust
+// A private struct — only usable within this module and its descendants.
+struct Foo;
+
+// A public struct with a private field.
+pub struct Bar {
+    field: i32, // private: not accessible outside this module
+}
+
+// A public enum with two public variants.
+// Enum variants in a pub enum are public by default.
+pub enum State {
+    PubliclyAccessibleState,
+    PubliclyAccessibleState2,
+}
+```
+
+<Note>
+There are two exceptions to "private by default": associated items in a `pub` trait are public by default, and enum variants in a `pub` enum are public by default.
+</Note>
+
+## Access Rules
+
+An item may be accessed from a location `m` in two cases:
+
+1. **The item is `pub`** — it can be accessed externally from `m` if all ancestor modules up to the item are also accessible from `m`. (Re-exports can also provide access; see below.)
+2. **The item is private** — it may be accessed by the current module and its descendants.
+
+## Visibility Levels
+
+### `pub` — Fully Public
+
+`pub` makes an item visible to everyone who can see the module path leading to it. For an external crate to use a `pub` item, every module in the path must also be `pub`:
+
+```rust
+pub mod submodule {
+    pub fn my_method() {} // Accessible to external crates via `crate::submodule::my_method`
+    fn my_implementation() {} // Private: only accessible within `submodule` and its children
+}
+```
+
+### `pub(crate)` — Crate-Wide Visibility
+
+`pub(crate)` makes an item visible anywhere within the current crate but not to external crates:
+
+```rust
+pub(crate) fn crate_helper() {
+    // Any module in this crate can call this.
+}
+```
+
+### `pub(super)` — Parent Module Visibility
+
+`pub(super)` makes an item visible to the parent module. It is equivalent to `pub(in super)`:
+
+```rust
+mod outer {
+    mod inner {
+        pub(super) fn visible_to_outer() {}
+    }
+    fn example() {
+        inner::visible_to_outer(); // OK: outer is the parent of inner
+    }
+}
+```
+
+### `pub(self)` — Current Module Only
+
+`pub(self)` makes an item visible only within the current module. It is equivalent to not using `pub` at all:
+
+```rust
+mod m {
+    pub(self) fn inner_only() {} // Same as no pub qualifier
+}
+```
+
+### `pub(in path)` — Specific Ancestor
+
+`pub(in path)` makes an item visible within a specific ancestor module. The path must resolve to an ancestor module of the item, and each identifier in the path must refer directly to a module (not a `use` alias):
+
+```rust
+pub mod outer_mod {
+    pub mod inner_mod {
+        // Visible within `outer_mod` only.
+        pub(in crate::outer_mod) fn outer_mod_visible_fn() {}
+
+        // Visible within the entire crate.
+        pub(crate) fn crate_visible_fn() {}
+
+        // Visible to the parent (outer_mod).
+        pub(super) fn super_mod_visible_fn() {
+            inner_mod_visible_fn(); // OK: same module
+        }
+
+        // Visible only within inner_mod (same as private).
+        pub(self) fn inner_mod_visible_fn() {}
+    }
+
+    pub fn foo() {
+        inner_mod::outer_mod_visible_fn(); // OK
+        inner_mod::crate_visible_fn();     // OK
+        inner_mod::super_mod_visible_fn(); // OK
+        // inner_mod::inner_mod_visible_fn(); // ERROR: private
+    }
+}
+
+fn bar() {
+    outer_mod::inner_mod::crate_visible_fn(); // OK: pub(crate)
+    // outer_mod::inner_mod::outer_mod_visible_fn(); // ERROR: not visible outside outer_mod
+    outer_mod::foo(); // OK
+}
+```
+
+<Note>
+In the 2018 edition and later, paths for `pub(in path)` must start with `crate`, `self`, or `super`. The 2015 edition also allows paths starting with `::` or crate-root modules.
+</Note>
+
+<Warning>
+`pub(in path)` only adds a restriction — it does not guarantee that an item is visible throughout the specified scope. All parent modules must still be visible at the access site.
+</Warning>
+
+## A Full Example
+
+```rust
+mod crate_helper_module {
+    // Visible to any module in the crate.
+    pub fn crate_helper() {}
+
+    // Visible only inside crate_helper_module and its children.
+    fn implementation_detail() {}
+}
+
+// Visible to external crates.
+pub fn public_api() {}
+
+pub mod submodule {
+    use crate::crate_helper_module;
+
+    pub fn my_method() {
+        // Both rules allow this call.
+        crate_helper_module::crate_helper();
+    }
+
+    // Hidden outside submodule.
+    fn my_implementation() {}
+
+    #[cfg(test)]
+    mod test {
+        #[test]
+        fn test_my_implementation() {
+            // Descendants can access private items of their ancestors.
+            super::my_implementation();
+        }
+    }
+}
+```
+
+## Re-Exports with `pub use`
+
+`pub use` re-exports an item, making it accessible through the new path even if the item's original module is private:
+
+```rust
+pub use self::implementation::api;
+
+mod implementation {   // private module
+    pub mod api {
+        pub fn f() {}
+    }
+}
+```
+
+External code can now call `api::f()` even though `implementation` is private. The path `implementation::api::f` would still produce a privacy violation.
+
+```rust
+// A common pattern: expose a flat public API from a nested implementation.
+mod internal {
+    pub struct Config {
+        pub timeout: u32,
+    }
+    pub fn connect(cfg: Config) -> bool { true }
+}
+
+pub use internal::Config;
+pub use internal::connect;
+```
+
+<Tip>
+Re-exporting is the standard way to design crate APIs: keep implementation details in private or `pub(crate)` modules, and selectively expose only what users should depend on via `pub use` at the crate root.
+</Tip>
+
+## Struct Fields and Visibility
+
+Each field in a struct has its own visibility. A `pub` struct with private fields is a common pattern for encapsulation:
+
+```rust
+pub struct Point {
+    pub x: f64,   // Accessible everywhere the struct is accessible
+    pub y: f64,   // Accessible everywhere the struct is accessible
+}
+
+pub struct SecretPoint {
+    pub x: f64,
+    y: f64,       // Private: only accessible inside this module
+}
+
+impl SecretPoint {
+    pub fn new(x: f64, y: f64) -> Self {
+        SecretPoint { x, y }
+    }
+
+    pub fn y(&self) -> f64 {
+        self.y // Accessible: we are inside the defining module
+    }
+}
+```
+
+Private fields prevent external code from directly constructing or pattern-matching the struct — callers must use constructor functions or builder patterns instead.
+
+## Visibility in Trait Implementations
+
+When implementing a trait:
+
+- **The trait is `pub`**: The associated items in the implementation are accessible to anyone who can use the impl (because they are part of the trait's interface).
+- **The impl is for a private type**: The impl items are only accessible where the type itself is accessible.
+
+You cannot use visibility modifiers on items within a trait implementation — their visibility is determined by the trait declaration.
+
+## Visibility and the Module Hierarchy
+
+Rust's name resolution operates on a global hierarchy of modules. Think of each module as a node in a tree rooted at the crate root. Visibility declarations determine which subtrees of this hierarchy can access a given item:
+
+- `pub` — the entire tree (external crates can see it if the path to it is also public)
+- `pub(crate)` — the entire tree within this crate
+- `pub(super)` — the parent subtree
+- `pub(in path)` — a specific ancestor subtree
+- (no qualifier) — the current subtree only

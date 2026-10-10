@@ -1,0 +1,358 @@
+---
+title: "Diagnostics and Code Generation Attributes in Rust"
+sidebarTitle: "Diagnostics & Codegen"
+description: "Reference for Rust's diagnostic attributes (lint levels, #[deprecated], #[must_use]) and code generation attributes (#[inline], #[target_feature], #[cfg])."
+---
+
+Rust provides a rich set of built-in attributes for controlling compiler diagnostics and influencing code generation. Diagnostic attributes let you adjust lint levels, mark items as deprecated, and enforce that return values are used. Code generation attributes give you fine-grained control over inlining, platform-specific instruction selection, symbol visibility, and conditional compilation.
+
+## Diagnostic Attributes
+
+### Lint Check Attributes
+
+The attributes `allow`, `expect`, `warn`, `deny`, and `forbid` adjust the lint level for the entity they are applied to. They use the MetaListPaths syntax to specify one or more lint names:
+
+| Attribute | Effect |
+|-----------|--------|
+| `#[allow(C)]` | Suppress lint `C` — violations go unreported |
+| `#[expect(C)]` | Expect lint `C` to fire; warn if it does not |
+| `#[warn(C)]` | Warn about violations of `C` but continue compiling |
+| `#[deny(C)]` | Signal an error on violation of `C` |
+| `#[forbid(C)]` | Like `deny`, but also prevents changing the level later |
+
+```rust
+pub mod m1 {
+    #[allow(missing_docs)]
+    pub fn undocumented_one() -> i32 { 1 }
+
+    #[warn(missing_docs)]
+    pub fn undocumented_too() -> i32 { 2 }
+
+    #[deny(missing_docs)]
+    pub fn undocumented_end() -> i32 { 3 }
+}
+```
+
+Lint attributes can override each other: a more specific (inner) attribute takes precedence over a less specific (outer) one, as long as you are not trying to override a `forbid` level:
+
+```rust
+#[warn(missing_docs)]
+pub mod m2 {
+    #[allow(missing_docs)]
+    pub mod nested {
+        // Suppressed by the inner allow.
+        pub fn undocumented_one() -> i32 { 1 }
+
+        // Overridden back to warn despite the outer allow.
+        #[warn(missing_docs)]
+        pub fn undocumented_two() -> i32 { 2 }
+    }
+}
+```
+
+All lint attributes support an optional `reason` parameter:
+
+```rust
+#[allow(unused_mut, reason = "only modified on some platforms")]
+let mut file_name = std::path::PathBuf::from("git");
+```
+
+#### `#[expect]`
+
+`#[expect(C)]` suppresses lint `C` and emits an `unfulfilled_lint_expectations` warning if the lint would not have fired anyway. This is useful for ensuring a lint is actually being triggered where you expect it:
+
+```rust
+fn main() {
+    // This expectation will be fulfilled — `answer` is unused.
+    #[expect(unused_variables)]
+    let answer = "SpongeBob SquarePants!";
+
+    // This expectation will NOT be fulfilled — `question` is used.
+    // An `unfulfilled_lint_expectations` warning is emitted.
+    #[expect(unused_variables)]
+    let question = "who lives in a pineapple under the sea?";
+    println!("{question}");
+}
+```
+
+#### Lint Groups
+
+Lints are organized into named groups. Using a group name is equivalent to listing all lints in the group. There is also a special group `"warnings"` that includes all lints currently at the warn level:
+
+```rust,compile_fail
+#[deny(warnings)]
+#[warn(unsafe_code)]
+fn example_err() {
+    // The unsafe_code warning has been promoted to deny via `warnings`.
+    unsafe { /* ... */ }
+}
+```
+
+#### Tool Lint Attributes
+
+Lint attributes can be scoped to a specific tool using `tool::lint_name`:
+
+```rust
+// Set the entire `pedantic` Clippy group to warn.
+#![warn(clippy::pedantic)]
+
+#[allow(clippy::cmp_nan)]
+fn foo() {}
+```
+
+Tool lints are only checked when the associated tool is active.
+
+### `#[deprecated]`
+
+The `#[deprecated]` attribute marks an item as deprecated. `rustc` issues warnings when deprecated items are used and `rustdoc` shows the deprecation information.
+
+Syntax forms:
+- `#[deprecated]` — issues a generic message.
+- `#[deprecated = "message"]` — includes a custom string.
+- `#[deprecated(since = "version", note = "message")]` — includes version and explanation.
+
+```rust
+#[deprecated(since = "5.2.0", note = "foo was rarely used. Users should instead use bar")]
+pub fn foo() {}
+
+pub fn bar() {}
+```
+
+`#[deprecated]` may be applied to items, trait items, enum variants, struct fields, external block items, and macro definitions. When applied to a containing item like a module or implementation, all child items inherit the deprecation.
+
+### `#[must_use]`
+
+The `#[must_use]` attribute marks a value that must be used. If an expression of that type (or a call to a `#[must_use]` function) is used as an expression statement without being bound to anything, the `unused_must_use` lint fires.
+
+```rust
+#[must_use]
+fn use_me1() -> u8 { 0 }
+
+#[must_use = "explanation of why it should be used"]
+fn use_me2() -> u8 { 0 }
+```
+
+`#[must_use]` can be applied to structs, enumerations, unions, functions, and traits. When applied to a type:
+
+```rust,compile_fail
+#![deny(unused_must_use)]
+#[must_use]
+struct MustUse();
+MustUse(); // ERROR: Unused value that must be used.
+```
+
+<Note>
+The idiomatic way to explicitly discard a `#[must_use]` value is to bind it to `_`: `let _ = f();` or `_ = f();`.
+</Note>
+
+### `diagnostic::on_unimplemented`
+
+The `#[diagnostic::on_unimplemented]` attribute provides a custom error message when a required trait is not implemented. It accepts `message`, `label`, and `note` keys. Format parameters `{Self}` and `{GenericParameterName}` are substituted at compile time:
+
+```rust,compile_fail
+#[diagnostic::on_unimplemented(
+    message = "My Message for `ImportantTrait<{A}>` implemented for `{Self}`",
+    label = "My Label",
+    note = "Note 1",
+    note = "Note 2"
+)]
+trait ImportantTrait<A> {}
+
+fn use_my_trait(_: impl ImportantTrait<i32>) {}
+
+fn main() {
+    use_my_trait(String::new()); // Custom error message here
+}
+```
+
+### `diagnostic::do_not_recommend`
+
+The `#[diagnostic::do_not_recommend]` attribute tells the compiler not to suggest a particular trait implementation in diagnostic messages. This is useful for broad blanket impls that may confuse programmers:
+
+```rust,ignore
+#[diagnostic::do_not_recommend]
+impl<T, ST> AsExpression<ST> for T
+where
+    T: Expression<SqlType = ST>,
+{
+    type Expression = T;
+}
+```
+
+## Code Generation Attributes
+
+### `#[inline]`
+
+The `#[inline]` attribute suggests to the compiler whether to inline a copy of the function's code at the call site.
+
+```rust
+#[inline]
+pub fn example1() {}
+
+#[inline(always)]
+pub fn example2() {}
+
+#[inline(never)]
+pub fn example3() {}
+```
+
+Modes:
+- `#[inline]` — a _suggestion_ to inline.
+- `#[inline(always)]` — a _suggestion_ to always inline.
+- `#[inline(never)]` — a _suggestion_ to never inline.
+
+All three are hints; the compiler may ignore them. May be applied to functions with bodies: free functions, closures, async blocks, associated functions in inherent or trait impls, and default trait functions.
+
+<Note>
+`#[inline]` is ignored if the function is externally exported with `#[no_mangle]` or `#[export_name]`.
+</Note>
+
+### `#[cold]`
+
+The `#[cold]` attribute hints that a function is unlikely to be called, helping the compiler optimize the hot path:
+
+```rust
+#[cold]
+pub fn handle_error(e: &str) {
+    eprintln!("Error: {e}");
+}
+```
+
+Like `#[inline]`, it may only be applied to functions with bodies.
+
+### `#[target_feature(enable = "...")]`
+
+The `#[target_feature]` attribute enables code generation for specific platform CPU features for a single function. It uses the `enable` key with a comma-separated list of feature names:
+
+```rust
+# #[cfg(target_feature = "avx2")]
+#[target_feature(enable = "avx2")]
+fn foo_avx2() {
+    // This function can use AVX2 instructions.
+}
+```
+
+Functions with `#[target_feature]` can only be safely called from contexts that also enable all those features, or from unsafe code:
+
+```rust
+# #[cfg(target_feature = "sse2")] {
+#[target_feature(enable = "sse")]
+fn foo_sse() {}
+
+fn bar() {
+    // Unsafe because we must verify SSE is available at runtime.
+    unsafe { foo_sse(); }
+}
+
+#[target_feature(enable = "sse")]
+fn bar_sse() {
+    foo_sse(); // Safe: same feature level.
+}
+# }
+```
+
+<Warning>
+Calling a `#[target_feature]` function on a platform that does not support that feature is undefined behavior (on most platforms). Check for feature availability at runtime with macros like `is_x86_feature_detected!`.
+</Warning>
+
+A function with `#[target_feature]` never implements the `Fn`, `FnMut`, or `FnOnce` traits (though closures inheriting the feature from the enclosing function do). `#[inline(always)]` may not be combined with `#[target_feature]`.
+
+### `#[track_caller]`
+
+The `#[track_caller]` attribute makes the parent call location available within a function via `std::panic::Location::caller()`. This is useful for writing assertion helpers that report the line where they were called, not the line inside the helper:
+
+```rust
+#[track_caller]
+fn f() {
+    println!("{}", std::panic::Location::caller());
+}
+
+fn calls_f() {
+    f(); // f() prints this location
+}
+```
+
+When multiple attributed functions are chained, the outermost unattributed call site is reported. The attribute may be applied to any function with the Rust ABI except `fn main`.
+
+<Note>
+Coercing a `#[track_caller]` function to a function pointer creates a shim that appears to come from the definition site. Caller information is lost across virtual dispatch.
+</Note>
+
+### `#[no_mangle]` and `#[export_name]`
+
+These attributes control the symbol name exported from the compiled object file.
+
+- **`#[unsafe(no_mangle)]`** — disables Rust's symbol name encoding; the symbol name is exactly the function or static name.
+- **`#[unsafe(export_name = "name")]`** — specifies a custom exported symbol name.
+
+Both are unsafe attributes because incorrect use can cause undefined behavior through symbol conflicts.
+
+### `#[unsafe(link_section = "...")]`
+
+Specifies which section of the object file a function or static is placed in. This is an unsafe attribute.
+
+## Conditional Compilation
+
+### The `cfg` Attribute
+
+The `#[cfg(predicate)]` attribute conditionally includes or excludes an item based on a configuration predicate:
+
+```rust
+#[cfg(target_os = "linux")]
+fn linux_only() {}
+
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+fn apple_platforms() {}
+
+#[cfg(all(target_arch = "x86_64", feature = "simd"))]
+fn x86_simd() {}
+
+#[cfg(not(debug_assertions))]
+fn release_only() {}
+```
+
+### The `cfg_attr` Attribute
+
+`#[cfg_attr(predicate, attr)]` conditionally applies another attribute:
+
+```rust
+#[cfg_attr(test, derive(Debug))]
+struct Foo;
+
+// Equivalent to:
+// #[derive(Debug)]  -- only in test mode
+// struct Foo;
+```
+
+Multiple attributes can be listed: `#[cfg_attr(condition, attr1, attr2)]`.
+
+### The `cfg!` Macro
+
+The `cfg!` macro evaluates a configuration predicate at compile time and returns a `bool` constant. Unlike `#[cfg]`, the code is still compiled (and must be type-correct) regardless of the result:
+
+```rust
+if cfg!(target_os = "windows") {
+    println!("Running on Windows!");
+} else {
+    println!("Not running on Windows.");
+}
+```
+
+<Tip>
+Use `#[cfg]` on items and `cfg!` inside expressions. Both accept the same predicate language: `target_os`, `target_arch`, `target_feature`, `feature`, `debug_assertions`, `unix`, `windows`, and so on.
+</Tip>
+
+### Common Configuration Options
+
+| Option | Description |
+|--------|-------------|
+| `target_arch = "x86_64"` | Target CPU architecture |
+| `target_os = "linux"` | Target operating system |
+| `target_family = "unix"` | OS family (`unix`, `windows`, `wasm`) |
+| `unix` | Alias for `target_family = "unix"` |
+| `windows` | Alias for `target_family = "windows"` |
+| `target_env = "gnu"` | ABI / libc variant |
+| `target_feature = "avx2"` | Available CPU features |
+| `debug_assertions` | Enabled in debug builds |
+| `test` | Enabled when running `cargo test` |
+| `feature = "my_feature"` | Cargo feature flags |

@@ -1,0 +1,190 @@
+---
+title: "Undefined Behavior in Rust: What Must Never Happen"
+sidebarTitle: "Undefined Behavior"
+description: "The complete list of behaviors considered undefined in Rust, behaviors that are not unsafe, and how to write sound unsafe abstractions."
+---
+
+Rust code is *incorrect* if it exhibits any of the behaviors listed in this document. This applies to code inside `unsafe` blocks and `unsafe` functions just as much as safe code — `unsafe` only means that the responsibility for avoiding undefined behavior shifts to the programmer. It does not make undefined behavior acceptable. Understanding what constitutes undefined behavior (UB) is essential for writing correct `unsafe` code and for reasoning about the soundness of libraries.
+
+<Warning>
+**The following list is not exhaustive.** There is no complete formal model of Rust's semantics for unsafe code, and additional behaviors may be declared undefined in the future. The list may also shrink — some items may become defined in later Rust versions. Before writing `unsafe` code, read the [Rustonomicon](https://doc.rust-lang.org/nomicon/).
+</Warning>
+
+## Soundness
+
+It is the programmer's responsibility when writing `unsafe` code to ensure that any safe code interacting with it cannot trigger undefined behavior. `unsafe` code that satisfies this property for any safe client is called **sound**; code that can be misused by safe code to produce undefined behavior is called **unsound**.
+
+## Behaviors Considered Undefined
+
+### Data Races
+
+A **data race** occurs when two or more threads access the same memory location concurrently, at least one access is a write, and the accesses are not synchronized. Data races are always undefined behavior in Rust.
+
+```rust
+// This is undefined behavior if two threads run it simultaneously:
+static mut COUNTER: u64 = 0;
+unsafe { COUNTER += 1; } // UB if there is concurrent access
+```
+
+Use atomics (`std::sync::atomic::*`) or synchronization primitives (`Mutex`, `RwLock`) to safely share mutable state between threads.
+
+### Dangling Pointers
+
+A reference or pointer is **dangling** if not all of the bytes it points to are part of the same live allocation. Accessing a dangling pointer is undefined behavior:
+
+```rust
+let reference = {
+    let x = 5;
+    &x  // ERROR: `x` does not live long enough
+    // x is dropped here; the reference would dangle
+};
+```
+
+<Note>
+Zero-sized types (ZSTs) are an exception: a pointer to a ZST is never dangling, even if it is a null pointer, because there are no bytes to access.
+</Note>
+
+### Misaligned Pointers
+
+Accessing a place based on a **misaligned pointer** is undefined behavior. A place is based on a misaligned pointer if the last `*` projection was performed on a pointer that was not aligned for its type:
+
+```rust
+// If `ptr` has type *const u32 (alignment 4):
+let x: [u8; 8] = [0u8; 8];
+let ptr = x.as_ptr().wrapping_add(1) as *const u32;
+
+// UB: `ptr` is not 4-byte aligned, and we are accessing it as u32
+let _val = unsafe { *ptr }; // undefined behavior
+```
+
+Note that the alignment requirement comes from the **pointer's type**, not the type of the field being accessed.
+
+### Breaking Aliasing Rules
+
+Rust's aliasing rules require:
+
+- **`&T`** must point to memory that is not mutated while the reference is live (except data inside `UnsafeCell<T>`).
+- **`&mut T`** must point to memory that is not read or written by any pointer not derived from it, and no other reference points to it while it is live.
+- **`Box<T>`** is treated similarly to `&'static mut T`.
+
+These rules apply to all references and boxes, including those stored in private fields:
+
+```rust
+let mut x = 5i32;
+let r = &x;
+let p = &mut x as *mut i32; // creating a raw pointer is fine
+
+// UB: writing through `p` while `r` is still live
+unsafe { *p = 10; } // violates &T aliasing: `r` is still live
+println!("{}", r);
+```
+
+### Mutating Immutable Bytes
+
+Mutating bytes that are declared immutable is undefined behavior:
+
+- All bytes reachable through a `const`-promoted expression are immutable.
+- The bytes owned by an immutable binding or immutable `static` are immutable (unless they are inside `UnsafeCell<U>`).
+- The bytes pointed to by a shared reference, transitively through other references and `Box`es, are immutable (unless inside `UnsafeCell<U>`).
+
+```rust
+let x: i32 = 5;
+let p = &x as *const i32 as *mut i32;
+// UB: `x` is an immutable binding
+unsafe { *p = 10; }
+```
+
+### Invoking Undefined Behavior via Compiler Intrinsics
+
+Using compiler intrinsics incorrectly (e.g., passing out-of-range values to `unchecked_add`, or violating the contract of `assume`) is undefined behavior.
+
+### Executing Code with Unsupported Platform Features
+
+Executing code compiled with platform features that the current platform does not support (e.g., using AVX-512 instructions on a CPU without AVX-512) is undefined behavior — except if the platform explicitly documents such use as safe.
+
+### Calling a Function with the Wrong ABI
+
+Calling a function with a mismatched calling convention (e.g., calling a `"stdcall"` function as `"C"`), or unwinding past a stack frame that does not allow unwinding (e.g., panicking through a `"C"` FFI boundary), is undefined behavior.
+
+### Producing an Invalid Value
+
+Producing a value that violates a type's validity invariant is immediately undefined behavior. "Producing" a value includes assignment, reading from memory, passing to a function, and returning from a function.
+
+<Warning>
+The following are all undefined behavior:
+</Warning>
+
+| Invalid value | Why |
+|--------------|-----|
+| `bool` with value other than `0` or `1` | Invalid discriminant |
+| `char` in the surrogate range (`0xD800..=0xDFFF`) or above `char::MAX` | Not a valid Unicode scalar value |
+| A value of type `!` | The never type has no valid values |
+| An uninitialized integer, float, or raw pointer | Uninitialized bits |
+| An `enum` with an invalid discriminant | Discriminant must match a defined variant |
+| A `fn` pointer that is null | Function pointers must be non-null |
+| A reference or `Box<T>` that is null, dangling, or unaligned | Must be valid and aligned |
+| `NonNull<T>` or `NonZero<T>` with value zero | Custom valid range violated |
+
+```rust
+// UB: creating a bool with value 2
+let x: bool = unsafe { std::mem::transmute(2u8) };
+// x is an invalid bool — undefined behavior
+
+// UB: creating a reference to unaligned memory (if `ptr` is unaligned)
+let misaligned: &u32 = unsafe { &*(0x1 as *const u32) };
+```
+
+### Incorrect Use of Inline Assembly
+
+Incorrect use of `asm!` — violating any of the [rules for inline assembly](/memory/inline-assembly), such as modifying a register that was not declared as an output — is undefined behavior.
+
+### Violating Assumptions of the Rust Runtime
+
+The Rust runtime has implicit assumptions that, if violated, produce undefined behavior:
+
+- A Rust stack frame must not be deallocated without running destructors for local variables (e.g., using C's `longjmp` to skip over a Rust frame is UB).
+- Unwinding must follow the rules described in the [panic documentation](/memory/panic-and-runtime).
+
+## Pointed-To Bytes
+
+The span of bytes a pointer "points to" is determined by the pointer value and `size_of_val` of the pointee type. A dangling pointer is one where not all pointed-to bytes are part of the same live allocation.
+
+## Misaligned Places
+
+A place is "based on a misaligned pointer" if the last `*` dereference was on a pointer not aligned for its type. Misaligned access is UB only when the place is actually loaded from or stored to. Taking `&raw const` of a misaligned place is allowed.
+
+## Not Considered Unsafe
+
+The following behaviors are **not** undefined behavior in Rust, though they may be undesirable:
+
+### Integer Overflow
+
+In debug builds, integer overflow panics. In release builds, it wraps using two's complement. This wrapping behavior is **well-defined** and not undefined behavior:
+
+```rust
+// Debug: panics. Release: wraps to 0.
+let x: u8 = 255u8.wrapping_add(1); // always 0
+let y: u8 = 255 + 1; // panics in debug, wraps in release
+```
+
+To explicitly use wrapping arithmetic: `wrapping_add`, `wrapping_sub`, `wrapping_mul`, etc.
+
+### Deadlocks
+
+A program that deadlocks is incorrect but not undefined behavior. The program simply stops making progress — it does not produce corrupted state.
+
+### Memory and Resource Leaks
+
+Leaking memory (e.g., via `mem::forget`) is safe. Types **must not** rely on their destructors running for soundness.
+
+### Exiting Without Calling Destructors
+
+`std::process::exit` and `std::process::abort` terminate the process without running destructors. This is safe.
+
+### Exposing Randomized Base Addresses
+
+Leaking pointer values (e.g., printing a pointer address) is safe, even though it may expose ASLR-randomized base addresses.
+
+### Logic Errors
+
+Safe code may violate logical constraints (e.g., having `Hash` and `Eq` implementations that are inconsistent, or mutating keys in a `HashMap`). These lead to unspecified — but not undefined — behavior: panics, incorrect results, or non-termination.

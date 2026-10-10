@@ -1,0 +1,186 @@
+---
+title: "Preludes: Automatically Imported Items in Rust"
+sidebarTitle: "Preludes"
+description: "What Rust's preludes are, what's in the standard library prelude, the extern prelude, the language prelude, and how no_std changes prelude behavior."
+---
+
+A _prelude_ is a collection of names that are automatically brought into scope in every module of a crate, without any explicit `use` declaration. Preludes are what allow you to write `Vec::new()` or `Option::Some(x)` without importing anything — those names come from the standard library prelude. There are five distinct preludes in Rust, each with its own purpose and priority.
+
+## The Five Preludes
+
+| Prelude | Contents | Shadowed by |
+|---------|----------|-------------|
+| Language prelude | Built-in types, built-in derives | (always in scope, cannot be shadowed by other preludes) |
+| Standard library prelude | Common types and traits | Language prelude |
+| `macro_use` prelude | Macros from `#[macro_use] extern crate` | Standard library prelude |
+| Tool prelude | Tool attribute module names | `macro_use` prelude |
+| Extern prelude | Crate names (`std`, `core`, etc.) | Tool prelude |
+
+Earlier entries in this list take priority when names conflict.
+
+<Note>
+Prelude names are not members of the current module. You cannot refer to them as `self::Box` even though `Box` is in scope. They are implicitly queried during name resolution.
+</Note>
+
+## Standard Library Prelude
+
+The standard library prelude is the most frequently encountered prelude. It consists of names from a single standard library module. Which module is used depends on the crate's edition and whether `#![no_std]` is applied:
+
+| Edition | Without `no_std` | With `no_std` |
+|---------|-------------------|----------------|
+| 2015 | `std::prelude::rust_2015` | `core::prelude::rust_2015` |
+| 2018 | `std::prelude::rust_2018` | `core::prelude::rust_2018` |
+| 2021 | `std::prelude::rust_2021` | `core::prelude::rust_2021` |
+| 2024 | `std::prelude::rust_2024` | `core::prelude::rust_2024` |
+
+### Key Items in the Default Prelude
+
+The standard prelude (v1, used by 2015 and 2018 editions) includes the following items. The 2021 and 2024 editions add additional items (like `TryFrom`, `TryInto`, and `FromIterator`):
+
+**Types and Type Aliases:**
+- `Option<T>` and its variants `Some`, `None`
+- `Result<T, E>` and its variants `Ok`, `Err`
+- `String` — owned, heap-allocated UTF-8 string
+- `Vec<T>` — growable array
+- `Box<T>` — heap-allocated value
+- `Rc<T>` — reference-counted smart pointer (not `Send`)
+
+**Traits:**
+- `Clone` — the `clone()` method
+- `Copy` — marker for types that are copied on assignment
+- `Send` — marker for types that can be sent between threads
+- `Sync` — marker for types that can be shared between threads
+- `Sized` — marker for types with a known compile-time size
+- `Drop` — custom destructor via `drop(&mut self)`
+- `Fn`, `FnMut`, `FnOnce` — callable types / closures
+- `Iterator` — the iteration protocol
+- `From`, `Into` — infallible value conversions
+- `ToOwned` — converting a borrowed type to an owned one
+- `AsRef`, `AsMut` — cheap reference conversions
+- `PartialEq`, `Eq`, `PartialOrd`, `Ord` — comparison traits
+- `Default` — a default constructor
+- `ToString` — conversion to `String`
+
+**Macros:**
+- `assert!`, `assert_eq!`, `assert_ne!` — panicking assertions
+- `dbg!` — debug-print and return a value
+- `format!` — format a string
+- `panic!` — trigger a panic
+- `print!`, `println!`, `eprint!`, `eprintln!` — output macros
+- `todo!`, `unimplemented!`, `unreachable!` — placeholder panics
+- `vec!` — create a `Vec` literal
+- `include!`, `include_str!`, `include_bytes!` — include file contents
+- `concat!`, `stringify!`, `env!`, `option_env!` — compile-time macros
+- `matches!` — pattern-matching predicate macro
+- `write!`, `writeln!` — write to a `Write` implementor
+
+**Others:**
+- `derive` — the attribute for automatic trait derivation (as a macro)
+
+## Extern Prelude
+
+The extern prelude contains the names of external crates. It is populated by:
+
+1. Crates imported with `extern crate` in the root module.
+2. Crates provided to the compiler via the `--extern` flag (as Cargo does).
+
+The `core` crate is always added to the extern prelude. The `std` crate is added unless `#![no_std]` is specified.
+
+```rust
+// In the 2015 edition, extern crate declarations were standard practice:
+// extern crate serde;
+
+// In the 2018+ editions, crates in the extern prelude can be used
+// directly in `use` declarations:
+use std::collections::HashMap;
+```
+
+<Note>
+Additional crates that ship with `rustc` (like `alloc` and `test`) are not automatically included with `--extern` when using Cargo, even in the 2018 edition. They must be brought in explicitly: `extern crate alloc;`.
+</Note>
+
+## Language Prelude
+
+The language prelude contains names that are built into the language itself. It is always in scope and cannot be removed even with `#![no_implicit_prelude]`.
+
+**In the type namespace:**
+- `bool`
+- `char`, `str`
+- Integer types: `i8`, `i16`, `i32`, `i64`, `i128`, `u8`, `u16`, `u32`, `u64`, `u128`
+- Machine-dependent integer types: `usize`, `isize`
+- Floating-point types: `f32`, `f64`
+
+**In the macro namespace:**
+- All built-in attributes
+- Built-in derive macros: `Clone`, `Copy`, `Debug`, `Default`, `Eq`, `Hash`, `Ord`, `PartialEq`, `PartialOrd`
+
+## The `macro_use` Prelude
+
+The `macro_use` prelude contains macros imported from external crates via the `#[macro_use]` attribute on an `extern crate` declaration in the crate root:
+
+```rust,ignore
+#[macro_use]
+extern crate log;
+
+// `warn!` is now available everywhere in this crate via the macro_use prelude.
+pub fn do_thing() {
+    warn!("example warning");
+}
+```
+
+Macros in the `macro_use` prelude can be shadowed by any other name. Unlike textual-scope macros, they can be used before the `extern crate` declaration appears in the file.
+
+## Tool Prelude
+
+The tool prelude contains tool names in the type namespace, enabling tool attributes to be written as `#[rustfmt::skip]` or `#[clippy::cyclomatic_complexity = "100"]`. These names are not visible as regular items.
+
+## `#![no_std]`
+
+The `#![no_std]` attribute, applied to the crate root, removes the standard library prelude and replaces it with the `core` prelude. The `std` crate is no longer automatically linked.
+
+```rust,ignore
+#![no_std]
+
+// Box, Vec, String, etc. are not available.
+// Only core types and traits are in the prelude.
+// Dynamic allocation requires explicit use of `alloc`.
+```
+
+<Warning>
+`#![no_std]` does not prevent `std` from being linked if a dependency brings it in. It only removes `std` from the prelude and stops auto-linking. You can still write `extern crate std;` to bring it back.
+</Warning>
+
+`no_std` is used for:
+- Embedded targets without an OS or allocator.
+- Crates that intentionally avoid heap allocation or OS capabilities.
+
+## `#[no_implicit_prelude]`
+
+The `#[no_implicit_prelude]` attribute prevents the standard library prelude, extern prelude, `macro_use` prelude, and tool prelude from being brought into scope for the annotated module and its descendants. The language prelude (built-in types) is unaffected.
+
+```rust
+// Applied to the crate root to affect all modules.
+#![no_implicit_prelude]
+
+// Or applied to a single module.
+#[no_implicit_prelude]
+mod example {
+    // `Vec`, `Option`, etc. are not in scope here.
+    // Must use full paths: `::std::vec::Vec`, `::core::option::Option`.
+}
+```
+
+<Note>
+Despite `#![no_implicit_prelude]`, `rustc` currently still brings certain built-in macros like `assert!`, `cfg!`, `concat!`, `panic!`, and others into scope implicitly. Do not rely on this behavior — it may change.
+</Note>
+
+## Explicit Import of Prelude Items
+
+While prelude items are automatic, you can import them explicitly to make the dependency clear or to shadow prelude names:
+
+```rust
+// Explicit import — equivalent to what the prelude does automatically.
+use std::prelude::v1::*;
+```
+
+This is rarely necessary in application code but can be useful when writing `#![no_std]` crates or when documenting which prelude items a module depends on.

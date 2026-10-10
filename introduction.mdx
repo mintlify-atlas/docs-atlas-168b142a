@@ -1,0 +1,83 @@
+---
+title: "The Rust Reference: Formal Language Specification"
+sidebarTitle: "Introduction"
+description: "The primary reference for the Rust programming language — what it covers, what it doesn't, how to navigate it, and how releases work."
+---
+
+The Rust Reference is the primary reference document for the Rust programming language. It is not a tutorial, not a guide, and not a replacement for the [Rust Book](https://doc.rust-lang.org/book/) — it is the authoritative specification of the language's syntax, semantics, and behavior. Each chapter generally stands alone, with cross-links to related chapters where needed.
+
+<Note>
+  For known bugs and omissions in this reference, see the [GitHub issues](https://github.com/rust-lang/reference/issues). If you find a case where compiler behavior and the text here disagree, file an issue so the discrepancy can be resolved.
+</Note>
+
+## Rust Releases
+
+Rust follows a regular six-week release cadence. The first stable release was Rust 1.0.0, followed by 1.1.0, and so on. Tools (`rustc`, `cargo`, etc.) and documentation — including the standard library docs and this reference — are all released together with each language release.
+
+The latest edition of this reference, matching the current stable Rust release, is always available at [https://doc.rust-lang.org/reference/](https://doc.rust-lang.org/reference/). Prior versions can be accessed by inserting the Rust version number before the `reference` path segment. For example, the reference for Rust 1.49.0 is at [https://doc.rust-lang.org/1.49.0/reference/](https://doc.rust-lang.org/1.49.0/reference/).
+
+## What *The Reference* Is Not
+
+Understanding the scope of this document is just as important as what it contains.
+
+**Not an introduction.** This reference assumes background familiarity with Rust. Readers new to the language should start with [The Rust Programming Language](https://doc.rust-lang.org/book/) book first.
+
+**Not standard library documentation.** The standard library is documented separately by extracting `doc` attributes from source code. Many features that feel like language-level features are actually library features in Rust — if you don't find something here, check the [standard library docs](https://doc.rust-lang.org/std/).
+
+**Not `rustc` or Cargo documentation.** The specifics of how `rustc` operates as a compiler tool are documented in the [`rustc` book](https://doc.rust-lang.org/rustc/). Cargo has its own [book](https://doc.rust-lang.org/cargo/) and [reference](https://doc.rust-lang.org/cargo/reference/). A small number of pages in this reference — such as the [linkage](https://doc.rust-lang.org/reference/linkage.html) chapter — do touch on `rustc`-specific behavior.
+
+**Not a guide to unstable features.** This reference covers only what is available in stable Rust. Unstable features being actively developed are tracked in the [Unstable Book](https://doc.rust-lang.org/nightly/unstable-book/).
+
+**Not a specification of optimizations.** Rust compilers, including `rustc`, are free to perform optimizations. The reference does not specify which optimizations are permitted. Think of a compiled program as a black box: you can only observe its behavior by running it with specific inputs and observing the outputs. Everything observable must conform to what this reference specifies.
+
+## How to Use This Reference
+
+This reference is designed for non-linear reading. Each chapter can generally be read in isolation and will link to other chapters when it references concepts defined elsewhere.
+
+There are two primary ways to use this document:
+
+**Answering a specific question.** If you know which chapter is relevant, jump there directly via the table of contents. Otherwise, press `s` or click the search icon in the top bar to search by keyword. For example, to find when a temporary value created in a `let` statement is dropped, searching "temporary let" will lead you to the lifetimes of temporaries section in the expressions chapter.
+
+**Deepening general knowledge.** Browse the table of contents for topics of interest and read at your own pace. Follow cross-links freely — there is no wrong way to explore the reference.
+
+## Conventions
+
+This reference uses several consistent display conventions:
+
+- **Defined terms** are introduced in *italics* and linked thereafter whenever they appear.
+- **Edition differences** are called out in edition blocks, like this:
+
+  > **Edition 2018:** Before the 2018 edition, behavior was X. As of 2018, behavior is Y.
+
+- **Notes** highlight useful context that is mostly out of scope for the main text.
+- **Warnings** flag unsound behavior or potentially confusing language interactions.
+- **Code examples** are shown in syntax-highlighted blocks with controls for copying, executing, and revealing hidden lines. All examples target the latest edition unless stated otherwise.
+
+```rust
+fn main() {
+    println!("This is a code example");
+}
+```
+
+- **Grammar and lexical productions** are described using the notation defined in the [Notation](notation.mdx) chapter.
+- **Rule identifiers** appear before each language rule in square brackets (e.g., `[example.rule.label]`). These provide stable links to individual rules. On narrow screens, a rule name collapses to `[*]`. The rule name can be clicked to link directly to that rule.
+
+<Warning>
+  The organization of rule identifiers is currently in flux. Rule identifier names are not stable between releases, and links to specific rules may break if they are reorganized. Stabilization is planned once the overall structure has settled.
+</Warning>
+
+- **Tests** associated with a rule appear as a `Tests` link below the rule (shown as `[T]` on narrow screens). Clicking opens a list of linked tests that can be viewed directly.
+
+## Complementary Books
+
+| Resource | Description |
+|---|---|
+| [The Rust Programming Language](https://doc.rust-lang.org/book/) | The introductory book — start here if you are new to Rust |
+| [Standard Library Docs](https://doc.rust-lang.org/std/) | API reference for the Rust standard library |
+| [The `rustc` Book](https://doc.rust-lang.org/rustc/) | How to use the `rustc` compiler |
+| [The Cargo Book](https://doc.rust-lang.org/cargo/) | The Rust package manager and build system |
+| [The Unstable Book](https://doc.rust-lang.org/nightly/unstable-book/) | Nightly-only and in-progress language features |
+
+## Contributing
+
+Contributions of all kinds are welcome. You can contribute by opening an issue or sending a pull request to the [Rust Reference repository](https://github.com/rust-lang/reference/). If this reference does not answer your question and you believe the answer is in scope, feel free to [file an issue](https://github.com/rust-lang/reference/issues) or ask in the `t-lang/doc` stream on [Zulip](https://rust-lang.zulipchat.com/#narrow/stream/237824-t-lang.2Fdoc). Knowing how readers use this book helps direct effort toward the most valuable improvements.

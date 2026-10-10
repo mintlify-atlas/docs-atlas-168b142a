@@ -1,0 +1,240 @@
+---
+title: "Compound Types in Rust: Tuples, Arrays, and Slices"
+sidebarTitle: "Compound Types"
+description: "Reference for Rust's compound types: tuple types, array types, slice types, struct types (named, tuple, unit), enum types, and union types with examples."
+---
+
+Rust groups compound types into sequence types (which are structural) and user-defined nominal types (structs, enums, and unions). Sequence types — tuples, arrays, and slices — are defined by their structure alone, while nominal types are identified by name. This page covers all of them.
+
+---
+
+## Tuple Types
+
+Tuple types are heterogeneous lists of other types. The syntax is a parenthesized, comma-separated list of types. A tuple with `n` fields is an *n-ary tuple*.
+
+```rust
+let unit: () = ();              // 0-ary tuple (unit)
+let single: (i32,) = (42,);    // 1-ary tuple (trailing comma required)
+let pair: (f64, f64) = (1.0, 2.0);
+let mixed: (String, i32) = (String::from("hello"), 42);
+```
+
+<Note>
+1-ary tuples require a trailing comma to disambiguate from a parenthesized type. `(i32)` is the type `i32`; `(i32,)` is a 1-tuple.
+</Note>
+
+Tuple fields are named using increasing numeric indices starting at `0`. Fields can be accessed by tuple index expression or by pattern matching:
+
+```rust
+let pair = (10, "ten");
+
+// Access by index
+let first = pair.0;   // 10
+let second = pair.1;  // "ten"
+
+// Access by pattern
+let (a, b) = pair;
+assert_eq!(a, 10);
+assert_eq!(b, "ten");
+```
+
+### Unit Type `()`
+
+The tuple type with no fields is called *unit* or *the unit type*, written `()`. Its one value is also called *unit*. Functions that do not return a meaningful value return `()` implicitly.
+
+```rust
+fn greet(name: &str) {
+    println!("Hello, {}!", name);
+    // implicitly returns ()
+}
+
+let result: () = greet("world");
+```
+
+Tuples are *structural types*: two tuple types with the same element types are the same type. For a nominal version, use [tuple structs](#tuple-struct-types).
+
+---
+
+## Array Types
+
+An array is a fixed-size sequence of `N` elements of type `T`. The array type is written as `[T; N]`. The size `N` must be a constant expression that evaluates to a `usize`.
+
+```rust
+// A stack-allocated array
+let array: [i32; 3] = [1, 2, 3];
+
+// A heap-allocated array, coerced to a slice
+let boxed_array: Box<[i32]> = Box::new([1, 2, 3]);
+```
+
+All elements of an array are always initialized. Array access in safe code is always bounds-checked; out-of-bounds access causes a panic.
+
+### Array Layout
+
+An array `[T; N]` has a size of `size_of::<T>() * N` and the same alignment as `T`. The `nth` element is at byte offset `n * size_of::<T>()` from the start of the array.
+
+```rust
+use std::mem::{size_of, align_of};
+assert_eq!(size_of::<[u32; 5]>(), 5 * size_of::<u32>());
+assert_eq!(align_of::<[u32; 5]>(), align_of::<u32>());
+```
+
+<Note>
+The `Vec<T>` standard library type provides a heap-allocated, resizable array.
+</Note>
+
+---
+
+## Slice Types
+
+A slice is a [dynamically sized type](/type-system/layout-and-coercions#dynamically-sized-types) that represents a view into a sequence of elements of type `T`. The slice type is written as `[T]`.
+
+Because slices are dynamically sized, they are always used behind a pointer:
+
+- `&[T]` — shared slice (borrows the data)
+- `&mut [T]` — mutable slice
+- `Box<[T]>` — owned, heap-allocated slice
+
+```rust
+// A heap-allocated array, coerced to a slice
+let boxed_array: Box<[i32]> = Box::new([1, 2, 3]);
+
+// A shared slice into an array
+let slice: &[i32] = &boxed_array[..];
+```
+
+All elements of a slice are always initialized. Slice access in safe code is always bounds-checked. A `&[T]` is a fat pointer containing a data pointer and a `usize` length.
+
+Slices have the same layout as the section of the array they slice.
+
+---
+
+## Struct Types
+
+A struct type is a heterogeneous product of other types, called *fields*. Rust has three kinds of structs:
+
+### Named-Field Structs
+
+Named-field structs have fields identified by name:
+
+```rust
+struct Point {
+    x: f64,
+    y: f64,
+}
+
+let origin = Point { x: 0.0, y: 0.0 };
+println!("({}, {})", origin.x, origin.y);
+```
+
+### Tuple Struct Types
+
+Tuple structs have anonymous fields accessed by numeric index:
+
+```rust
+struct Color(u8, u8, u8);
+
+let red = Color(255, 0, 0);
+println!("r={}, g={}, b={}", red.0, red.1, red.2);
+```
+
+### Unit-Like Struct Types
+
+Unit-like structs have no fields. The only value of a unit-like struct type is the value constructed by its struct expression:
+
+```rust
+struct Marker;
+
+let m = Marker;
+```
+
+### Struct Memory Layout
+
+The memory layout of a struct is undefined by default, allowing the compiler to reorder fields for optimization. It can be fixed with the `repr` attribute. Fields may be given in any order in a struct expression — the resulting value always has the same memory layout regardless of expression order.
+
+Fields of a struct may be given [visibility modifiers] to control access from outside their module.
+
+<Note>
+See the [Layout & Coercions](/type-system/layout-and-coercions) page for details on `#[repr(C)]`, `#[repr(transparent)]`, and other layout-controlling attributes.
+</Note>
+
+---
+
+## Enum Types
+
+An enumerated type is a nominal, heterogeneous disjoint union type — a type that can hold one of several *variants*. Each variant is independently named and has the syntax of a struct, tuple struct, or unit-like struct.
+
+```rust
+enum Message {
+    Quit,                       // unit-like variant
+    Move { x: i32, y: i32 },   // struct-like variant
+    Write(String),              // tuple-like variant
+    ChangeColor(u8, u8, u8),   // tuple-like variant
+}
+```
+
+New instances are constructed with a struct expression using the variant's name:
+
+```rust
+let msg = Message::Move { x: 10, y: 20 };
+let quit = Message::Quit;
+let write = Message::Write(String::from("hello"));
+```
+
+Any `enum` value consumes as much memory as the largest variant, plus space for the discriminant. Enum types cannot be described structurally — they must be referred to by their declared name.
+
+### Pattern Matching on Enums
+
+Enums are most useful when combined with pattern matching:
+
+```rust
+# enum Message {
+#     Quit,
+#     Move { x: i32, y: i32 },
+#     Write(String),
+#     ChangeColor(u8, u8, u8),
+# }
+# let msg = Message::Move { x: 10, y: 20 };
+match msg {
+    Message::Quit => println!("Quit"),
+    Message::Move { x, y } => println!("Move to ({}, {})", x, y),
+    Message::Write(text) => println!("Write: {}", text),
+    Message::ChangeColor(r, g, b) => println!("Color: {}, {}, {}", r, g, b),
+}
+```
+
+---
+
+## Union Types
+
+A union type is a nominal, heterogeneous C-like union, allowing different types to occupy the same memory location. Unions have no notion of an "active field": every union access transmutes parts of the union's content to the accessed field's type.
+
+```rust
+union MyUnion {
+    int_val: u32,
+    float_val: f32,
+}
+
+let u = MyUnion { int_val: 42 };
+
+// Reading a union field is unsafe because it may be an invalid bit pattern
+// for the accessed type
+let val = unsafe { u.int_val };
+```
+
+<Warning>
+Reading from a union field requires `unsafe` because the compiler cannot verify that the data is a valid representation for the accessed type. Accessing the wrong field results in undefined behavior.
+</Warning>
+
+Union field types are restricted to types that do not need dropping (i.e., types that implement `Copy`, or types that are the target of raw pointers). The memory layout of a union is undefined by default but can be fixed with `#[repr(C)]` or other `repr` attributes.
+
+Recursive types (structs, enums, or unions that refer to themselves) are allowed, but the size must be finite — recursive fields must be behind pointer types:
+
+```rust
+enum List<T> {
+    Nil,
+    Cons(T, Box<List<T>>)
+}
+
+let a: List<i32> = List::Cons(7, Box::new(List::Cons(13, Box::new(List::Nil))));
+```

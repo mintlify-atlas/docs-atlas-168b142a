@@ -1,0 +1,203 @@
+---
+title: "Primitive Types in Rust: Boolean, Numeric, Char, and str"
+sidebarTitle: "Primitive Types"
+description: "Reference for Rust's primitive types: bool, integers, floats, char, str string slices, and the never type (!), with sizes, ranges, and validity rules."
+---
+
+Rust's primitive types are the fundamental building blocks of the type system. They are tightly integrated into the language in ways that user-defined types cannot replicate. This page covers `bool`, the integer types, the floating-point types, `char`, `str`, and the never type `!`.
+
+---
+
+## Boolean (`bool`)
+
+The boolean type represents one of two values: `true` or `false`. It is a part of the language prelude under the name `bool`.
+
+```rust
+let b: bool = true;
+```
+
+A `bool` has a size and alignment of **1 byte**. The value `false` has the bit pattern `0x00` and `true` has the bit pattern `0x01`. Any other bit pattern is **undefined behavior**.
+
+<Warning>
+It is undefined behavior to create a `bool` with any bit pattern other than `0x00` or `0x01`, for example via `transmute`.
+</Warning>
+
+The boolean type is used as the condition operand in `if` and `while` expressions, and as the operands of lazy boolean operators (`&&`, `||`). Boolean operators follow standard boolean logic:
+
+| `a` | `b` | `a & b` | `a \| b` | `a ^ b` |
+|-----|-----|---------|----------|---------|
+| `true`  | `true`  | `true`  | `true`  | `false` |
+| `true`  | `false` | `false` | `true`  | `true`  |
+| `false` | `true`  | `false` | `true`  | `true`  |
+| `false` | `false` | `false` | `false` | `false` |
+
+Like all primitives, `bool` implements `Clone`, `Copy`, `Sized`, `Send`, and `Sync`.
+
+---
+
+## Integer Types
+
+Rust provides both signed (two's complement) and unsigned integer types at a range of fixed widths, plus machine-pointer-sized variants.
+
+### Unsigned Integers
+
+| Type    | Size (bytes) | Minimum | Maximum              |
+|---------|-------------|---------|----------------------|
+| `u8`    | 1           | 0       | 255 (2⁸ − 1)         |
+| `u16`   | 2           | 0       | 65,535 (2¹⁶ − 1)     |
+| `u32`   | 4           | 0       | 4,294,967,295 (2³² − 1) |
+| `u64`   | 8           | 0       | 2⁶⁴ − 1              |
+| `u128`  | 16          | 0       | 2¹²⁸ − 1             |
+| `usize` | platform    | 0       | platform max address |
+
+### Signed Integers
+
+| Type    | Size (bytes) | Minimum           | Maximum           |
+|---------|-------------|-------------------|-------------------|
+| `i8`    | 1           | −128 (−2⁷)        | 127 (2⁷ − 1)      |
+| `i16`   | 2           | −32,768 (−2¹⁵)    | 32,767 (2¹⁵ − 1)  |
+| `i32`   | 4           | −2,147,483,648    | 2,147,483,647     |
+| `i64`   | 8           | −2⁶³              | 2⁶³ − 1           |
+| `i128`  | 16          | −2¹²⁷             | 2¹²⁷ − 1          |
+| `isize` | platform    | platform min      | platform max      |
+
+### Machine-Dependent Types (`usize` and `isize`)
+
+`usize` is an unsigned integer with the same number of bits as the platform's pointer type. It can represent every memory address in the process. `isize` is the signed counterpart; the theoretical upper bound on object and array size is the maximum `isize` value.
+
+Both `usize` and `isize` are **at least 16 bits wide**. On 32-bit platforms they are 4 bytes; on 64-bit platforms they are 8 bytes.
+
+<Note>
+While a `usize` can represent every address, converting a pointer to a `usize` is not necessarily reversible. See `std::ptr` and its documentation on provenance.
+</Note>
+
+### Integer Overflow Behavior
+
+In debug builds, integer overflow causes a panic. In release builds (with overflow checks disabled), integers wrap using two's complement arithmetic. You can explicitly opt into wrapping, checked, saturating, or overflowing arithmetic using the corresponding methods on integer types.
+
+### Bit Validity
+
+For every numeric type `T`, the bit validity of `T` is equivalent to the bit validity of `[u8; size_of::<T>()]`. An uninitialized byte is not a valid `u8`.
+
+---
+
+## Floating-Point Types
+
+Rust provides two IEEE 754 floating-point types:
+
+| Type  | Size (bytes) | Standard       |
+|-------|-------------|----------------|
+| `f32` | 4           | IEEE 754 binary32 |
+| `f64` | 8           | IEEE 754 binary64 |
+
+Both types support the special values `NaN` (not-a-number), positive infinity, and negative infinity. Floating-point arithmetic follows IEEE 754 semantics.
+
+<Warning>
+Float range patterns may not use `NaN` as a bound. Comparing `NaN` to any value (including itself) with `==` always returns `false`.
+</Warning>
+
+```rust
+let x: f64 = f64::NAN;
+assert!(x != x);  // NaN is not equal to itself
+
+let inf: f32 = f32::INFINITY;
+let neg_inf: f32 = f32::NEG_INFINITY;
+```
+
+The alignment of `f32` and `f64` is platform-specific. On many 32-bit platforms, `f64` is aligned to 4 bytes rather than 8.
+
+---
+
+## Character Type (`char`)
+
+The `char` type represents a single [Unicode scalar value](http://www.unicode.org/glossary/#unicode_scalar_value) — a code point in the range U+0000 to U+D7FF or U+E000 to U+10FFFF (surrogates are excluded).
+
+```rust
+let c: char = 'a';
+let emoji: char = '😀';
+let unicode: char = '\u{1F600}';
+```
+
+`char` is represented as a **32-bit unsigned word** and is guaranteed to have the same size and alignment as `u32` on all platforms (4 bytes).
+
+<Warning>
+It is undefined behavior to create a `char` outside the valid Unicode scalar value range (U+0000..=U+D7FF or U+E000..=U+10FFFF), for example via `transmute`.
+</Warning>
+
+Every byte of a `char` is guaranteed to be initialized — `transmute::<char, [u8; 4]>(...)` is always sound, but the inverse is not always sound because not all 32-bit patterns are valid `char` values.
+
+---
+
+## String Slice (`str`)
+
+The `str` type represents a sequence of characters as a UTF-8 byte sequence. It is the type behind string literals in Rust.
+
+```rust
+let greeting1: &str = "Hello, world!";
+let greeting2: &str = "你好，世界";
+```
+
+A value of type `str` is represented the same way as `[u8]` — a slice of 8-bit unsigned bytes. Methods working on `str` assume and ensure the data is valid UTF-8; calling a `str` method with a non-UTF-8 buffer can cause undefined behavior.
+
+### `str` is a Dynamically Sized Type
+
+`str` is a [dynamically sized type (DST)](/type-system/layout-and-coercions#dynamically-sized-types) — its size is not known at compile time. Because of this, `str` can only be used behind a pointer:
+
+- `&str` — a shared reference to a string slice (the most common form)
+- `&mut str` — a mutable string slice reference
+- `Box<str>` — a heap-allocated string slice
+
+The layout of `&str` is the same as `&[u8]`: a fat pointer containing a data pointer and a byte length.
+
+<Note>
+`str` does not implement `Sized`. This means `str` cannot be used as a local variable, function parameter, or field type directly — only behind a pointer.
+</Note>
+
+---
+
+## Never Type (`!`)
+
+The never type `!` is a type with **no values**, representing computations that never complete — also called *diverging* computations.
+
+```rust
+fn foo() -> ! {
+    loop {}
+}
+```
+
+```rust
+fn always_ok() -> Result<u32, !> {
+    Ok(42)
+}
+```
+
+Expressions of type `!` can be coerced into **any type**, because code after a diverging expression is unreachable:
+
+```rust
+let x: i32 = loop {}; // `loop {}` has type `!`, coerces to `i32`
+```
+
+The never type is useful as an error type when an operation is infallible:
+
+```rust
+# use std::str::FromStr;
+struct Anything(String);
+
+impl FromStr for Anything {
+    type Err = !;
+
+    fn from_str(s: &str) -> Result<Self, !> {
+        Ok(Anything(s.to_owned()))
+    }
+}
+
+// This does not need to check for the `Err` variant because
+// `FromStr::Err` is the never type.
+let Ok(s) = Anything::from_str("example");
+```
+
+<Note>
+The standard library type `std::convert::Infallible` is a type alias for `!`. Before `!` was stabilized as a type, `Infallible` served the same purpose.
+</Note>
+
+Any diverging expression has type `!`, but diverging expressions are not limited to type `!`. For example, `Some(loop {})` has type `Option<!>`. If a type to be inferred is only unified with diverging expressions, it is inferred to be `!`.

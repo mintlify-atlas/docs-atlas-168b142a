@@ -1,0 +1,291 @@
+---
+title: "Variables, Memory Allocation, and Destructors in Rust"
+sidebarTitle: "Variables & Destructors"
+description: "How Rust manages variables as stack places, initialization rules, drop order for locals and fields, the Drop trait, and ManuallyDrop."
+---
+
+Rust's ownership system integrates tightly with how variables are allocated on the stack, how they are initialized, and how they are cleaned up when they go out of scope. Every value in a Rust program has an owner, and when that owner goes away, the value is *dropped* — its destructor is run, and any resources it holds are released. Understanding this lifecycle is fundamental to writing correct Rust code, especially when working with types that manage external resources such as file handles, network connections, or heap memory.
+
+## Variables
+
+A *variable* is a component of a stack frame. This includes named function parameters, anonymous temporaries created during expression evaluation, and named local variables declared with `let`.
+
+A *local variable* (or *stack-local* allocation) holds a value directly, allocated within the stack's memory. The value is a part of the stack frame.
+
+### Mutability
+
+Local variables are immutable unless declared otherwise:
+
+```rust
+let x = 5;       // immutable
+let mut y = 10;  // mutable
+y += 1;
+```
+
+Function parameters are also immutable unless declared with `mut`:
+
+```rust
+fn process(mut value: Box<i32>, label: String) {
+    // `value` is mutable, `label` is not
+    *value += 1;
+}
+```
+
+The `mut` keyword applies only to the parameter it directly precedes. In `|mut x, y|`, only `x` is mutable; `y` is not.
+
+### Initialization
+
+Local variables are **not initialized when allocated**. At function entry, the entire frame's worth of local variable storage is set up in an uninitialized state. Subsequent statements may initialize variables, but the compiler enforces via static analysis that a variable must be initialized before it is used.
+
+```rust
+fn initialization_example() {
+    let init_after_if: ();
+    let uninit_after_if: ();
+
+    if rand_bool() {
+        init_after_if = ();
+        uninit_after_if = ();
+    } else {
+        init_after_if = ();
+        // uninit_after_if NOT initialized here
+    }
+
+    init_after_if;   // OK: initialized on all paths
+    // uninit_after_if; // ERROR: use of possibly uninitialized `uninit_after_if`
+}
+
+fn rand_bool() -> bool { true }
+```
+
+Only `unsafe` Rust can create a memory location without initializing it (via `MaybeUninit`). Reading an uninitialized value is undefined behavior.
+
+## Memory Allocation and Lifetime
+
+Program items (functions, modules, types) have their values calculated at compile time and stored uniquely in the memory image of the Rust process. They are neither dynamically allocated nor freed.
+
+The *heap* describes dynamically allocated memory, managed through `Box<T>` and similar constructs. The lifetime of a heap allocation is tied to the box value that owns it. Because box values may be moved between stack frames or stored in other heap allocations, heap allocations may outlive the frame they were created in.
+
+A heap allocation is guaranteed to reside at a single address for its entire lifetime — it is never relocated as a result of moving the owning `Box` value.
+
+```rust
+// Stack: lives for the duration of the enclosing scope
+let stack_int: i32 = 42;
+
+// Heap: lives until `heap_val` is dropped
+let heap_val: Box<String> = Box::new(String::from("hello"));
+```
+
+## Destructors
+
+When an initialized variable or temporary goes out of *scope*, its *destructor* is run. The destructor is also run when a variable is overwritten by assignment (the old value is dropped).
+
+The destructor of a type `T` consists of:
+
+1. If `T: Drop`, calling [`<T as core::ops::Drop>::drop`](https://doc.rust-lang.org/core/ops/trait.Drop.html#tymethod.drop).
+2. Recursively running the destructor of all of its fields.
+
+The order in which fields are destroyed is deterministic:
+
+- **Struct fields**: dropped in **declaration order**.
+- **Enum variant fields**: dropped in **declaration order**.
+- **Tuple fields**: dropped in **order** (first to last).
+- **Array/slice elements**: dropped from the **first element to the last**.
+- **Closure captures by move**: dropped in an **unspecified order**.
+- **Trait objects**: run the destructor of the underlying type.
+
+```rust
+struct PrintOnDrop(&'static str);
+
+impl Drop for PrintOnDrop {
+    fn drop(&mut self) {
+        println!("{}", self.0);
+    }
+}
+
+let mut overwritten = PrintOnDrop("drops when overwritten");
+overwritten = PrintOnDrop("drops when scope ends");
+
+let tuple = (PrintOnDrop("Tuple first"), PrintOnDrop("Tuple second"));
+
+let moved;
+// No destructor run on assignment:
+moved = PrintOnDrop("Drops when moved");
+// Drops now, but is then uninitialized:
+moved;
+
+// Uninitialized does not drop:
+let uninitialized: PrintOnDrop;
+
+// After a partial move, only the remaining fields are dropped:
+let mut partial_move = (PrintOnDrop("first"), PrintOnDrop("forgotten"));
+core::mem::forget(partial_move.1);
+// When partial_move's scope ends, only the first field is dropped.
+```
+
+## Drop Scopes and Drop Order
+
+Each variable or temporary is associated with a *drop scope*. When control flow leaves a drop scope, all variables associated with that scope are dropped in **reverse order of declaration** (for variables) or **reverse order of creation** (for temporaries).
+
+Drop scopes are defined for:
+
+- The entire function body
+- Each statement
+- Each expression
+- Each block (including the function body block)
+- Each arm of a `match` expression
+
+When multiple scopes are exited at once (e.g., when returning from a function), variables are dropped from the innermost scope outward.
+
+### Scopes of Local Variables
+
+Local variables declared in a `let` statement are associated with the scope of the block containing that `let` statement:
+
+```rust
+struct PrintOnDrop(&'static str);
+impl Drop for PrintOnDrop {
+    fn drop(&mut self) { println!("drop({})", self.0); }
+}
+
+let declared_first = PrintOnDrop("Dropped last in outer scope");
+{
+    let declared_in_block = PrintOnDrop("Dropped in inner scope");
+}  // declared_in_block dropped here
+let declared_last = PrintOnDrop("Dropped first in outer scope");
+// declared_last dropped here, then declared_first
+```
+
+### Scopes of Function Parameters
+
+All function parameters are in the scope of the entire function body, so they are dropped **last** when the function returns. Each actual parameter is dropped after any bindings introduced in that parameter's pattern:
+
+```rust
+struct PrintOnDrop(&'static str);
+impl Drop for PrintOnDrop {
+    fn drop(&mut self) { println!("drop({})", self.0); }
+}
+
+// Drops `y`, then the second parameter, then `x`, then the first parameter
+fn patterns_in_parameters(
+    (x, _): (PrintOnDrop, PrintOnDrop),
+    (_, y): (PrintOnDrop, PrintOnDrop),
+) {}
+
+// drop order is 3 2 0 1
+patterns_in_parameters(
+    (PrintOnDrop("0"), PrintOnDrop("1")),
+    (PrintOnDrop("2"), PrintOnDrop("3")),
+);
+```
+
+### Variables in Patterns
+
+Variables in patterns are dropped in **reverse order of declaration** within the pattern:
+
+```rust
+let (declared_first, declared_last) = (
+    PrintOnDrop("Dropped last"),
+    PrintOnDrop("Dropped first"),
+);
+```
+
+## The `Drop` Trait
+
+A type implements `Drop` to run custom cleanup logic when it is destroyed:
+
+```rust
+struct DatabaseConnection {
+    id: u32,
+}
+
+impl Drop for DatabaseConnection {
+    fn drop(&mut self) {
+        println!("Closing connection {}", self.id);
+        // Perform cleanup: flush, close socket, etc.
+    }
+}
+
+{
+    let conn = DatabaseConnection { id: 42 };
+    // ... use conn ...
+} // `drop` is called automatically here
+```
+
+Important rules about `Drop`:
+
+- You cannot call `drop` directly on a value by calling `<T as Drop>::drop`. To run a destructor early, use `drop(value)` (the free function from `std`).
+- If a type implements `Drop`, it cannot be `Copy`.
+- If you implement `Drop` for a generic type, the `Drop` impl may have bounds, but those bounds must match the bounds on the type definition.
+
+If a destructor must be run manually (such as when implementing a smart pointer), use [`core::ptr::drop_in_place`](https://doc.rust-lang.org/core/ptr/fn.drop_in_place.html).
+
+## Not Running Destructors
+
+### `core::mem::forget` and `ManuallyDrop`
+
+[`core::mem::forget`](https://doc.rust-lang.org/core/mem/fn.forget.html) prevents the destructor of a value from running:
+
+```rust
+use std::mem;
+
+let conn = DatabaseConnection { id: 1 };
+mem::forget(conn); // destructor will NOT be called
+```
+
+[`core::mem::ManuallyDrop<T>`](https://doc.rust-lang.org/core/mem/struct.ManuallyDrop.html) wraps a value and inhibits its destructor. It is used in contexts where you want to control precisely when (or whether) the destructor runs:
+
+```rust
+use std::mem::ManuallyDrop;
+
+let mut x = ManuallyDrop::new(String::from("hello"));
+
+// We can access the value:
+println!("{}", *x);
+
+// We can manually drop it:
+unsafe {
+    ManuallyDrop::drop(&mut x);
+}
+// The String's destructor has now been run manually.
+// Do NOT drop `x` again!
+```
+
+<Warning>
+Preventing a destructor from running via `mem::forget` or `ManuallyDrop` is **safe** — it does not cause undefined behavior on its own. However, types **must not** rely on their destructor running for soundness. If a destructor is skipped, resources such as file handles or mutex guards may be leaked.
+</Warning>
+
+### Process Termination Without Unwinding
+
+There are situations where destructors will not run:
+
+- `std::process::exit` terminates the process immediately without running destructors.
+- `std::process::abort` terminates the process without running destructors.
+- If the [panic handler](/memory/panic-and-runtime) is set to `abort`, panicking will always terminate the process without destructors being run.
+- When a panic reaches a non-unwinding ABI boundary, either no destructors will run, or all destructors up until the ABI boundary will run.
+
+## Constant Promotion
+
+A value expression may be *promoted* to a `'static` slot when:
+
+1. The expression could be written in a constant context.
+2. The resulting value does not contain interior mutability or destructors.
+
+For example, `&None` always has type `&'static Option<_>` because `None` contains nothing that would prevent promotion.
+
+## Temporary Lifetime Extension
+
+Temporary scopes in `let` statements are sometimes *extended* to the scope of the block containing the `let` statement. This happens when the usual temporary scope would be too small:
+
+```rust
+let x = &mut 0;
+// The temporary for `0` lives to the end of the block,
+// not just to the end of the let statement.
+println!("{}", x);
+```
+
+Lifetime extension also applies to `static` and `const` items:
+
+```rust
+const C: &Vec<i32> = &Vec::new();
+// The Vec lives for the entire program, not just the initializer.
+println!("{:?}", C);
+```

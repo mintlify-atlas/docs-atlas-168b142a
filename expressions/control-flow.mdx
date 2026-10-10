@@ -1,0 +1,420 @@
+---
+title: "Control Flow Expressions in Rust: if, loop, match, return"
+sidebarTitle: "Control Flow"
+description: "Rust control flow: if/else, if let, while, for, loop with break values, labeled loops, match arms and guards, return, and underscore expressions."
+---
+
+Rust's control flow expressions — `if`, `loop`, `while`, `for`, `match`, and `return` — are all *expressions*, meaning they produce values that can be used inline. This makes Rust's control flow composable in ways that purely statement-based languages cannot achieve. This page covers every control flow expression with full examples.
+
+## `if` and `else` Expressions
+
+An `if` expression evaluates a boolean condition and executes the consequent block if the condition is `true`. Optional `else if` and `else` branches handle the remaining cases.
+
+```rust
+let x = 3;
+if x == 4 {
+    println!("x is four");
+} else if x == 3 {
+    println!("x is three");
+} else {
+    println!("x is something else");
+}
+```
+
+Because `if` is an expression, it can produce a value:
+
+```rust
+let y = if 12 * 15 > 150 {
+    "Bigger"
+} else {
+    "Smaller"
+};
+assert_eq!(y, "Bigger");
+```
+
+<Warning>
+  All branches of an `if` expression must have the same type. If there is no `else` branch, the `if` evaluates to `()`, so all branches must also evaluate to `()`.
+</Warning>
+
+### `if let` Patterns
+
+`let` patterns in an `if` condition allow binding new variables into scope when the pattern matches successfully. If the pattern does not match, execution falls through to the `else` branch.
+
+```rust
+let dish = ("Ham", "Eggs");
+
+// This body will be skipped because the pattern is refuted
+if let ("Bacon", b) = dish {
+    println!("Bacon is served with {}", b);
+} else {
+    // This block is evaluated instead
+    println!("No bacon will be served");
+}
+
+// This body will execute
+if let ("Ham", b) = dish {
+    println!("Ham is served with {}", b);
+}
+
+if let _ = 5 {
+    println!("Irrefutable patterns are always true");
+}
+```
+
+Multiple patterns can be specified with the `|` operator:
+
+```rust
+enum E { X(u8), Y(u8), Z(u8) }
+let v = E::Y(12);
+if let E::X(n) | E::Y(n) = v {
+    assert_eq!(n, 12);
+}
+```
+
+### Chains of Conditions
+
+Multiple condition operands can be combined with `&&`. Each operand is evaluated left to right; if one evaluates to `false` or a `let` pattern fails to match, subsequent operands are not evaluated. Bindings from earlier patterns are available in later conditions.
+
+```rust
+fn single() {
+    let outer_opt = Some(Some(1i32));
+
+    if let Some(inner_opt) = outer_opt
+        && let Some(number) = inner_opt
+        && number == 1
+    {
+        println!("Peek a boo");
+    }
+}
+```
+
+<Note>
+  Let chains in `if` conditions are only available beginning with Rust 2024.
+</Note>
+
+---
+
+## `while` Loops
+
+A `while` loop repeats the evaluation of a block while a condition remains true.
+
+```rust
+let mut i = 0;
+
+while i < 10 {
+    println!("hello");
+    i = i + 1;
+}
+```
+
+`while` expressions evaluate to `()`.
+
+### `while let` Patterns
+
+`let` patterns in a `while` condition bind new variables into scope on each iteration. When the pattern fails to match, the loop exits.
+
+```rust
+let mut x = vec![1, 2, 3];
+
+while let Some(y) = x.pop() {
+    println!("y = {}", y);
+}
+```
+
+Multiple patterns with `|` are supported:
+
+```rust
+let mut vals = vec![2, 3, 1, 2, 2];
+while let Some(v @ 1) | Some(v @ 2) = vals.pop() {
+    // Prints 2, 2, then 1
+    println!("{}", v);
+}
+```
+
+---
+
+## `for` Loops
+
+A `for` expression loops over elements provided by an implementation of `std::iter::IntoIterator`.
+
+```rust
+let v = &["apples", "cake", "coffee"];
+
+for text in v {
+    println!("I like {}.", text);
+}
+```
+
+```rust
+let mut sum = 0;
+for n in 1..11 {
+    sum += n;
+}
+assert_eq!(sum, 55);
+```
+
+If the iterator yields a value, it is matched against the irrefutable pattern, the body executes, and control returns to the head of the loop. `for` expressions evaluate to `()`.
+
+---
+
+## `loop` Expressions (Infinite Loops)
+
+A `loop` expression repeats execution of its body continuously. Without an associated `break` expression, it is diverging with type `!`.
+
+```rust
+loop { println!("I live."); } // diverging — never returns
+```
+
+### Break Values
+
+A `loop` can be used as an expression that produces a value via `break`:
+
+```rust
+let (mut a, mut b) = (1, 1);
+let result = loop {
+    if b > 10 {
+        break b;
+    }
+    let c = a + b;
+    a = b;
+    b = c;
+};
+// first Fibonacci number over 10:
+assert_eq!(result, 13);
+```
+
+The type of the `loop` is the least upper bound of all `break` operands. A `break` without an expression is equivalent to `break ()`.
+
+---
+
+## Loop Labels, `break`, and `continue`
+
+All loop types (`loop`, `while`, `for`) and labeled block expressions support `break` and (except labeled blocks) `continue`. Labels allow `break` and `continue` to target an outer enclosing loop.
+
+```rust
+'outer: loop {
+    while true {
+        break 'outer;
+    }
+}
+```
+
+```rust
+let mut last = 0;
+for x in 1..100 {
+    if x > 12 {
+        break;
+    }
+    last = x;
+}
+assert_eq!(last, 12);
+```
+
+Label shadowing follows the same rules as local variables:
+
+```rust
+'a: loop {
+    'a: loop {
+        break 'a;
+    }
+    print!("outer loop");
+    break 'a;
+}
+```
+
+### Labeled Block Expressions
+
+Labeled block expressions are exactly like block expressions but allow using `break` with a label to exit early and produce a value. Unlike loops, the label is *required* on both the block and the `break`:
+
+```rust
+fn do_thing() {}
+fn condition_not_met() -> bool { true }
+fn do_next_thing() {}
+fn do_last_thing() {}
+
+let result = 'block: {
+    do_thing();
+    if condition_not_met() {
+        break 'block 1;
+    }
+    do_next_thing();
+    if condition_not_met() {
+        break 'block 2;
+    }
+    do_last_thing();
+    3
+};
+```
+
+---
+
+## `match` Expressions
+
+<Tabs>
+  <Tab title="if vs match">
+
+  The two primary branching tools in Rust are `if` expressions (for boolean conditions and simple pattern matching) and `match` expressions (for exhaustive pattern matching against multiple arms).
+
+  ```rust
+  let x = 1;
+
+  // Using if/else if:
+  if x == 1 {
+      println!("one");
+  } else if x == 2 {
+      println!("two");
+  } else {
+      println!("other");
+  }
+
+  // Using match:
+  match x {
+      1 => println!("one"),
+      2 => println!("two"),
+      _ => println!("other"),
+  }
+  ```
+
+  Use `match` when:
+  - Exhaustively handling all variants of an enum
+  - Matching complex patterns (ranges, destructuring, bindings)
+  - Multiple arms share the same structure
+
+  Use `if` / `if let` when:
+  - Handling one or two simple conditions
+  - The condition is a boolean expression
+  </Tab>
+  <Tab title="match details">
+
+  A `match` expression branches on a pattern. It has a *scrutinee expression* (the value to compare against patterns) and a series of arms, each consisting of a pattern and a body.
+
+  ```rust
+  let x = 1;
+
+  match x {
+      1 => println!("one"),
+      2 => println!("two"),
+      3 => println!("three"),
+      4 => println!("four"),
+      5 => println!("five"),
+      _ => println!("something else"),
+  }
+  ```
+
+  Multiple patterns in one arm with `|`:
+
+  ```rust
+  let x = 9;
+  let message = match x {
+      0 | 1  => "not many",
+      2..=9  => "a few",
+      _      => "lots"
+  };
+  assert_eq!(message, "a few");
+  ```
+
+  The type of the `match` expression is the least upper bound of all arm types.
+  </Tab>
+</Tabs>
+
+### Match Guards
+
+Match arms can have a guard condition after the pattern using the `if` keyword:
+
+```rust
+let maybe_digit = Some(0);
+fn process_digit(i: i32) { println!("digit: {}", i); }
+fn process_other(i: i32) { println!("other: {}", i); }
+
+let message = match maybe_digit {
+    Some(x) if x < 10 => process_digit(x),
+    Some(x) => process_other(x),
+    None => panic!(),
+};
+```
+
+Guard conditions can also use `let` patterns to bind additional variables:
+
+```rust
+enum Command { Run(String), Stop }
+let cmd = Command::Run("example".to_string());
+
+match cmd {
+    Command::Run(name) if let Some(first_char) = name.chars().next() => {
+        println!("Running: {name} (starts with '{first_char}')");
+    }
+    Command::Run(name) => {
+        println!("{name} is empty");
+    }
+    _ => {}
+}
+```
+
+Multiple guards can be chained with `&&`:
+
+```rust
+let foo = Some([123]);
+let already_checked = false;
+match foo {
+    Some(xs) if let [single] = xs && !already_checked => { dbg!(single); }
+    _ => {}
+}
+```
+
+<Warning>
+  With `|` patterns in a single arm, the guard is evaluated for each pattern separately, which means it may execute multiple times.
+</Warning>
+
+### Binding Modes in Match
+
+Variables bound within the pattern are scoped to the match guard and the arm's expression. The binding mode (move, copy, or reference) depends on the pattern and how the scrutinee is matched.
+
+```rust
+struct S(i32, i32);
+
+match S(1, 2) {
+    S(z @ 1, _) | S(_, z @ 2) => assert_eq!(z, 1),
+    _ => panic!(),
+}
+```
+
+---
+
+## `return` Expressions
+
+A `return` expression moves its argument into the function's output location, destroys the current function activation frame, and transfers control to the caller. It is a diverging expression with type `!`.
+
+```rust
+fn max(a: i32, b: i32) -> i32 {
+    if a > b {
+        return a;
+    }
+    return b;
+}
+```
+
+<Note>
+  It is idiomatic in Rust to use the tail expression of a function (without `return`) as the return value, but explicit `return` is often clearer for early returns.
+</Note>
+
+---
+
+## Underscore Expressions
+
+Underscore expressions (`_`) are used in the *left-hand side of an assignment* to signify a placeholder in a destructuring assignment. They may only appear on the left-hand side.
+
+```rust
+let p = (1, 2);
+let mut a = 0;
+(_, a) = p;
+
+struct Position { x: u32, y: u32 }
+Position { x: a, y: _ } = Position { x: 2, y: 3 };
+
+// explicitly ignore result (removes unused_must_use warning)
+_ = 2 + 2;
+```
+
+<Note>
+  `_` in an assignment is distinct from the *wildcard pattern* `_` in a `let` or `match`. The underscore expression (`_ = expr`) is an assignment that discards a value; the wildcard pattern (`let _ = expr`) binds nothing in a pattern match.
+</Note>

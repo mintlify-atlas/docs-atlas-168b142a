@@ -1,0 +1,225 @@
+---
+title: "Testing and Derive Attributes in Rust"
+sidebarTitle: "Testing & Derive"
+description: "Reference for Rust's testing attributes (#[test], #[ignore], #[should_panic]) and the #[derive] attribute with its built-in derivable traits."
+---
+
+Rust provides a set of built-in attributes that drive its built-in test harness and the automatic derivation of common traits. These attributes are among the most frequently used in everyday Rust code. Compiling in "test" mode (via `cargo test` or `rustc --test`) enables building and running the test functions and also activates the `test` conditional compilation option.
+
+## Testing Attributes
+
+### `#[test]`
+
+The `#[test]` attribute marks a function to be executed as a test by the test harness. It is exported from the standard library prelude as `std::prelude::v1::test`.
+
+```rust,no_run
+pub fn add(left: u64, right: u64) -> u64 {
+    left + right
+}
+
+#[test]
+fn it_works() {
+    let result = add(2, 2);
+    assert_eq!(result, 4);
+}
+```
+
+**Requirements:**
+- The function must be a free (non-associated) monomorphic function.
+- It must take no arguments.
+- Its return type must implement the `Termination` trait.
+
+Types that implement `Termination` include:
+- `()` — passes as long as the function terminates without panicking.
+- `Result<T, E> where T: Termination, E: Debug` — passes when `Ok(())` is returned.
+- `ExitCode` — passes on `ExitCode::SUCCESS`, fails on `ExitCode::FAILURE`.
+
+```rust,no_run
+use std::io;
+
+fn setup_the_thing() -> io::Result<i32> { Ok(1) }
+fn do_the_thing(s: &i32) -> io::Result<()> { Ok(()) }
+
+#[test]
+fn test_the_thing() -> io::Result<()> {
+    let state = setup_the_thing()?; // expected to succeed
+    do_the_thing(&state)?;          // expected to succeed
+    Ok(())
+}
+```
+
+Test functions are only compiled in test mode. The `test` attribute uses the MetaWord syntax and only the first use on a function has effect.
+
+### `#[ignore]`
+
+The `#[ignore]` attribute skips execution of a test function without removing it from the compiled test binary. Ignored tests are still compiled in test mode.
+
+```rust,no_run
+#[test]
+#[ignore]
+fn check_thing() {
+    // This test is skipped by default.
+}
+```
+
+You can provide a reason using the string form:
+
+```rust,no_run
+#[test]
+#[ignore = "not yet implemented"]
+fn mytest() {
+    // ...
+}
+```
+
+<Note>
+The `rustc` test harness supports the `--include-ignored` flag to force ignored tests to run.
+</Note>
+
+The `ignore` attribute may only be applied to functions already annotated with `#[test]`. It uses both the MetaWord and MetaNameValueStr syntax forms.
+
+### `#[should_panic]`
+
+The `#[should_panic]` attribute causes a test to _pass_ only if the test function panics. If the function does not panic, the test fails. The return type of the function must be `()`.
+
+There are three syntax forms:
+
+**MetaWord** — passes if the function panics for any reason:
+
+```rust,no_run
+#[test]
+#[should_panic]
+fn mytest() {
+    panic!("error: some message, and more");
+}
+```
+
+**MetaNameValueStr** — the given string must appear within the panic message:
+
+```rust,no_run
+#[test]
+#[should_panic = "some message"]
+fn mytest() {
+    panic!("error: some message, and more");
+}
+```
+
+**MetaListNameValueStr** — equivalent to the above, using the `expected` key:
+
+```rust,no_run
+#[test]
+#[should_panic(expected = "values don't match")]
+fn mytest() {
+    assert_eq!(1, 2, "values don't match");
+}
+```
+
+<Warning>
+`#[should_panic]` may only be applied to functions also annotated with `#[test]`. Only the first use has effect; subsequent uses generate a lint warning.
+</Warning>
+
+## The `derive` Attribute
+
+The `#[derive]` attribute invokes one or more derive macros, allowing new trait implementations to be automatically generated for data structures. It uses the MetaListPaths syntax:
+
+```rust
+#[derive(PartialEq, Clone, Debug)]
+struct Foo<T> {
+    a: i32,
+    b: T,
+}
+```
+
+The generated implementations are equivalent to writing them by hand. For example, the `PartialEq` and `Clone` impls above would expand to:
+
+```rust
+# struct Foo<T> { a: i32, b: T }
+impl<T: PartialEq> PartialEq for Foo<T> {
+    fn eq(&self, other: &Foo<T>) -> bool {
+        self.a == other.a && self.b == other.b
+    }
+}
+
+impl<T: Clone> Clone for Foo<T> {
+    fn clone(&self) -> Self {
+        Foo { a: self.a.clone(), b: self.b.clone() }
+    }
+}
+```
+
+**Placement:** `#[derive]` may only be applied to structs, enums, and unions. It may be used any number of times on an item; all listed derive macros from all attributes are invoked.
+
+### Built-In Derivable Traits
+
+The following traits can be derived using built-in derive macros. They are defined in the language prelude:
+
+| Trait | What it generates |
+|-------|------------------|
+| `Clone` | A `clone()` method that duplicates the value |
+| `Copy` | Marks the type as `Copy` (implicitly clones on assignment) |
+| `Debug` | A `{:?}` formatter for debugging output |
+| `Default` | A `default()` constructor returning a default value |
+| `Eq` | Reflexive equality (requires `PartialEq`; no additional methods) |
+| `Hash` | The ability to hash the value with `std::hash::Hasher` |
+| `Ord` | Total ordering (requires `PartialOrd` and `Eq`) |
+| `PartialEq` | Equality via `eq()` and `ne()` |
+| `PartialOrd` | Partial ordering via `partial_cmp()` (requires `PartialEq`) |
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+let p1 = Point { x: 1, y: 2 };
+let p2 = p1; // Copy: p1 is still valid
+assert_eq!(p1, p2);
+
+let origin = Point::default();
+assert_eq!(origin, Point { x: 0, y: 0 });
+```
+
+<Tip>
+Deriving `Eq` requires `PartialEq`. Deriving `Ord` requires both `PartialOrd` and `Eq`. Deriving `Copy` requires `Clone`.
+</Tip>
+
+### Derive Macro Helper Attributes
+
+Custom derive macros (written as procedural macros) can declare _helper attributes_ to annotate fields or variants within the item the derive is applied to. Helper attributes are inert — they have no effect by themselves and exist only to provide extra information to the derive macro.
+
+```rust,ignore
+// In the proc-macro crate:
+#[proc_macro_derive(WithHelperAttr, attributes(helper))]
+pub fn derive_with_helper_attr(_item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    proc_macro::TokenStream::new()
+}
+```
+
+```rust,ignore
+// In user code:
+#[derive(WithHelperAttr)]
+struct Struct {
+    #[helper]   // This is a derive helper attribute.
+    field: (),
+}
+```
+
+Helper attributes come into scope for attributes applied to the item after the derive, and for attributes on fields and variants inside the item.
+
+### The `automatically_derived` Attribute
+
+Implementations generated by `#[derive(...)  ]` include the `#[automatically_derived]` attribute. This marker has no runtime effect but can be used by tools (such as Clippy or rustdoc) to distinguish generated code from hand-written implementations:
+
+```rust
+# struct Example;
+#[automatically_derived]
+impl ::core::clone::Clone for Example {
+    #[inline]
+    fn clone(&self) -> Self {
+        Example
+    }
+}
+```
+
+`automatically_derived` uses the MetaWord syntax and may only be applied to an implementation.

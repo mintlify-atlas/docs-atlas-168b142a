@@ -1,0 +1,182 @@
+---
+title: "Comments and Whitespace in Rust Source Files"
+sidebarTitle: "Comments & Whitespace"
+description: "A complete guide to Rust's line and block comments, inner and outer doc comments, their attribute equivalents, and whitespace handling rules."
+---
+
+Rust supports two comment styles inherited from C++ — line comments and block comments — along with a powerful doc comment system that integrates directly with the `rustdoc` documentation tool. Whitespace in Rust is free-form: it exists only to separate tokens and carries no semantic meaning. This chapter covers both in full.
+
+## Non-Doc Comments
+
+Rust comments follow the general C++ style:
+
+- **Line comments** begin with `//` and extend to the end of the line.
+- **Block comments** begin with `/*` and end with `*/`. Block comments can be nested.
+
+Non-doc comments are treated as a form of whitespace by the compiler — they are discarded during tokenization and have no effect on the compiled program.
+
+```rust
+// This is a line comment. Everything after // on this line is ignored.
+
+/* This is a block comment.
+   It can span multiple lines. */
+
+/* Block comments /* can be nested */ and this is still a comment. */
+```
+
+## Doc Comments
+
+Doc comments are a special syntax that the compiler translates into `#[doc = "..."]` attributes, which `rustdoc` uses to generate HTML documentation.
+
+### Outer Doc Comments
+
+Outer doc comments document the item that *follows* the comment. There are two forms:
+
+- **Line doc comment**: exactly three slashes `///`
+- **Block doc comment**: `/** ... */`
+
+```rust
+/// This documents the function below.
+/// It supports Markdown formatting.
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+/** This is a block doc comment.
+    It also documents the function below. */
+pub fn subtract(a: i32, b: i32) -> i32 {
+    a - b
+}
+```
+
+These are equivalent to writing `#[doc = "..."]` before the item:
+
+```rust
+#[doc = " This documents the function below."]
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+```
+
+Outer doc comments must appear before something that accepts an outer attribute.
+
+### Inner Doc Comments
+
+Inner doc comments document the *parent* of the comment — the enclosing module, crate, or item. There are two forms:
+
+- **Line inner doc comment**: `//!`
+- **Block inner doc comment**: `/*! ... */`
+
+```rust
+//! This documents the module (or crate) that contains this comment.
+//! Typically used at the top of a `lib.rs` or `mod` file.
+
+pub mod my_module {
+    //! Inner doc for `my_module`.
+
+    /*! Also an inner doc for `my_module`. */
+
+    pub fn helper() {}
+}
+```
+
+These are equivalent to writing `#![doc = "..."]` inside the enclosing item.
+
+<Note>
+  `//!` comments are most commonly used to document the crate root (`lib.rs` or `main.rs`) and module files. By convention, doc comments use Markdown formatting, as expected by `rustdoc`.
+</Note>
+
+<Warning>
+  The character `U+000D` (CR) is not allowed anywhere within a doc comment. Because CRLF normalization happens before tokenization, a `\r\n` line ending becomes `\n` before doc comments are processed, so this restriction effectively applies only to bare `\r` characters.
+</Warning>
+
+<Note>
+  Block doc comments do not specially handle Markdown content. For example, `` /** `glob = "*/*.rs";` */ `` terminates the comment at the first `*/`, and the remaining code would cause a syntax error. Line doc comments (`///`) are generally safer for content that might contain `*/` sequences.
+</Note>
+
+## Full Example
+
+The following example demonstrates all comment forms together:
+
+```rust
+//! A doc comment that applies to the implicit anonymous module of this crate
+
+pub mod outer_module {
+
+    //!  - Inner line doc
+    //!! - Still an inner line doc (but with a bang at the beginning)
+
+    /*!  - Inner block doc */
+    /*!! - Still an inner block doc (but with a bang at the beginning) */
+
+    //   - Only a comment
+    ///  - Outer line doc (exactly 3 slashes)
+    //// - Only a comment
+
+    /*   - Only a comment */
+    /**  - Outer block doc (exactly 2 asterisks) */
+    /*** - Only a comment */
+
+    pub mod inner_module {}
+
+    pub mod nested_comments {
+        /* In Rust /* we can /* nest comments */ */ */
+
+        // All three types of block comments can contain or be nested inside
+        // any other type:
+
+        /*   /* */  /** */  /*! */  */
+        /*!  /* */  /** */  /*! */  */
+        /**  /* */  /** */  /*! */  */
+        pub mod dummy_item {}
+    }
+
+    pub mod degenerate_cases {
+        // empty inner line doc
+        //!
+
+        // empty inner block doc
+        /*!*/
+
+        // empty line comment
+        //
+
+        // empty outer line doc
+        ///
+
+        // empty block comment
+        /**/
+
+        pub mod dummy_item {}
+
+        // empty 2-asterisk block is NOT a doc block — it is a regular block comment
+        /***/
+    }
+}
+```
+
+---
+
+## Whitespace
+
+Rust is a *free-form* language. Whitespace serves only to separate tokens in the grammar and has no semantic significance. A Rust program has identical meaning if each whitespace element is replaced with any other legal whitespace element, such as a single space character.
+
+Whitespace is any non-empty string consisting only of characters with the [`Pattern_White_Space`](https://www.unicode.org/reports/tr31/) Unicode property. The recognized whitespace characters are:
+
+| Code Point | Name |
+|---|---|
+| `U+0009` | Horizontal tab (`\t`) |
+| `U+000A` | Line feed (`\n`) |
+| `U+000B` | Vertical tab |
+| `U+000C` | Form feed |
+| `U+000D` | Carriage return (`\r`) |
+| `U+0020` | Space (` `) |
+| `U+0085` | Next line |
+| `U+200E` | Left-to-right mark |
+| `U+200F` | Right-to-left mark |
+| `U+2028` | Line separator |
+| `U+2029` | Paragraph separator |
+
+<Note>
+  Non-doc comments are also treated as whitespace by the compiler. This means `let/*comment*/x = 1;` is equivalent to `let x = 1;`.
+</Note>

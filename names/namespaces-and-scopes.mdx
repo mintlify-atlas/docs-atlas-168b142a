@@ -1,0 +1,245 @@
+---
+title: "Namespaces and Scopes in the Rust Name System"
+sidebarTitle: "Namespaces & Scopes"
+description: "How Rust organizes names into type, value, macro, lifetime, and label namespaces, and the scoping rules that govern where each name is visible."
+---
+
+Rust's name system is built around two orthogonal concepts: _namespaces_ separate entities by kind so that the same name can exist in different namespaces without conflict, and _scopes_ define the region of source text where a given name is visible. Understanding both is essential for reading and writing idiomatic Rust.
+
+## Namespaces
+
+A _namespace_ is a logical grouping of declared names. Names are segregated based on the kind of entity they refer to. When the compiler resolves a name, it looks in the namespace appropriate for the context.
+
+### The Five Namespaces
+
+#### Type Namespace
+
+The type namespace contains:
+- Module declarations
+- External crate declarations and extern prelude items
+- Struct, union, enum, and enum variant declarations
+- Trait item declarations
+- Type aliases and associated type declarations
+- Built-in types: `bool`, numeric types, `char`, `str`
+- Generic type parameters
+- `Self` (the type alias for the type being implemented or defined)
+- Tool attribute modules (e.g., `clippy::`, `rustfmt::`)
+
+#### Value Namespace
+
+The value namespace contains:
+- Function declarations
+- Constant and static item declarations
+- Struct constructors and enum variant constructors
+- `Self` (as a constructor in implementations)
+- Generic const parameters
+- Associated const and function declarations
+- Local variable bindings from `let`, `if let`, `while let`, `for`, `match`, and function/closure parameters
+- Captured closure variables
+
+#### Macro Namespace
+
+The macro namespace contains:
+- `macro_rules!` declarations
+- Built-in attributes
+- Tool attributes
+- Function-like procedural macros
+- Derive macros, derive macro helpers
+- Attribute macros
+
+The macro namespace is actually split into two _sub-namespaces_: one for bang-style macros (`my_macro!()`) and one for attributes (`#[my_attr]`). When resolving an attribute, bang-style macros in scope are ignored, and vice versa. This prevents `cfg` (an attribute) from shadowing `cfg!` (a macro), even though they share the same name.
+
+#### Lifetime Namespace
+
+The lifetime namespace contains generic lifetime parameters (e.g., `'a`, `'static`).
+
+#### Label Namespace
+
+The label namespace contains loop labels and block labels (e.g., `'outer:`).
+
+### Names Without a Namespace
+
+**Struct, enum, and union fields** are named but do not belong to a namespace. They can only be accessed via field expressions, which inspect the specific type being accessed.
+
+**`use` declarations** themselves do not belong to a specific namespace — instead they introduce aliases into one or more namespaces depending on the kind of item being imported.
+
+### Overlapping Names Across Namespaces
+
+The same name can be used in different namespaces without conflict. Here is a comprehensive example demonstrating all five namespaces at once:
+
+```rust
+// `Foo` introduces a type in the type namespace
+// and a constructor in the value namespace.
+struct Foo(u32);
+
+// `Foo` is also declared in the macro namespace.
+macro_rules! Foo {
+    () => {};
+}
+
+// `'Foo` introduces a lifetime parameter in the lifetime namespace.
+// `f: Foo` uses `Foo` from the type namespace.
+fn example<'Foo>(f: Foo) {
+    // `Foo` here refers to the constructor in the value namespace.
+    let ctor = Foo;
+
+    // `Foo!` invokes `Foo` from the macro namespace.
+    Foo! {}
+
+    // `'Foo:` introduces a label in the label namespace.
+    'Foo: loop {
+        // `'Foo` as a lifetime bound, `Foo` as a type — different namespaces.
+        let x: &'Foo Foo;
+        // `'Foo` as a label.
+        break 'Foo;
+    }
+}
+```
+
+## Scopes
+
+A _scope_ is the region of source text where a named entity may be referenced by that name. Different kinds of entities have different scoping rules.
+
+### Item Scopes
+
+An item declared directly in a **module** has a scope that extends from the start of the module to its end. These items are also members of the module and can be referenced by path.
+
+An item declared as a **statement** (inside a function body) has a scope from the start of the enclosing block to the end of that block.
+
+Items in outer modules are **not** in scope within nested modules — you must use a path to reach them.
+
+```rust
+mod outer {
+    pub fn hello() {}
+
+    mod inner {
+        fn example() {
+            // `hello` is not in scope here directly.
+            // Must use a path:
+            super::hello();
+            crate::outer::hello();
+        }
+    }
+}
+```
+
+It is an error to introduce an item with a duplicate name of another item in the same namespace within the same module or block.
+
+Items in a module may shadow items from any prelude.
+
+### Pattern Binding Scopes
+
+Local variable bindings from patterns have scopes that depend on where they are introduced:
+
+| Pattern context | Scope |
+|-----------------|-------|
+| `let` statement | From just after the `let` to the end of the block |
+| Function parameter | The entire function body |
+| Closure parameter | The closure body |
+| `for` binding | The loop body |
+| `if let` / `while let` | The following condition(s) and the consequent block |
+| `match` arm | The match guard and arm expression |
+
+Local variable scopes do not extend into item declarations nested inside the function.
+
+#### Pattern Binding Shadowing
+
+Pattern bindings are allowed to shadow any name in scope, with these exceptions (which are errors):
+
+- Const generic parameters
+- Static items
+- Const items
+- Constructors for structs and enums
+
+```rust
+fn shadow_example() {
+    foo(); // prints "function" — resolves to the item
+    let foo = || println!("closure");
+    fn foo() { println!("function"); }
+    foo(); // prints "closure" — the local binding shadows the item
+}
+```
+
+### Generic Parameter Scopes
+
+Generic parameters declared in a `GenericParams` list are in scope for the entire item they are declared on, including type bounds and where clauses. All parameters are in scope regardless of the order they are declared:
+
+```rust
+// 'b is referenced before it is declared — this is OK.
+fn params_scope<'a: 'b, 'b>() {}
+
+trait SomeTrait<const Z: usize> {}
+// N is referenced before it is declared.
+fn f<T: SomeTrait<N>, const N: usize>() {}
+```
+
+It is an error to reference a generic parameter from an inner function:
+
+```rust,compile_fail
+fn example<T>() {
+    fn inner(x: T) {} // ERROR: can't use generic parameters from outer function
+}
+```
+
+It is also an error to shadow a generic parameter (except inside nested functions within a function, which is allowed):
+
+```rust,compile_fail
+trait SomeTrait<'a, T, const N: usize> {
+    fn example_lifetime<'a>() {} // ERROR: 'a is already in use
+    fn example_type<T>() {} // ERROR: T is already in use
+}
+```
+
+### Loop Label Scopes
+
+Loop labels declared by loop expressions are in scope from the point of declaration to the end of the loop. They do not extend into items, closures, async blocks, const arguments, or const contexts:
+
+```rust
+'a: for n in 0..3 {
+    if n % 2 == 0 {
+        break 'a;
+    }
+    fn inner() {
+        // 'a is not in scope here.
+    }
+}
+```
+
+Loop labels may shadow labels of the same name in outer scopes:
+
+```rust
+'a: for outer in 0..5 {
+    'a: for inner in 0..5 {
+        break 'a; // Breaks the inner loop; the outer continues.
+    }
+}
+```
+
+### Prelude Scopes
+
+Preludes bring entities into scope in every module implicitly. They are not members of the module, but are queried during name resolution. Module declarations may shadow prelude names.
+
+The preludes are layered with a priority order — earlier entries may shadow later ones:
+
+1. Extern prelude
+2. Tool prelude
+3. `macro_use` prelude
+4. Standard library prelude
+5. Language prelude
+
+### `macro_rules` Scopes
+
+`macro_rules!` macros use textual scoping by default: the macro is in scope from its definition to the end of the enclosing module. Using `#[macro_use]` extends the macro's scope, and `#[macro_export]` gives the macro path-based scope from the crate root. See the [Macros by Example](/macros/macros-by-example) page for a full discussion.
+
+### `Self` Scope
+
+The `Self` type is in scope within struct, enum, union, trait, and implementation definitions, behaving similarly to a generic type parameter. In an implementation body, `Self` as a value constructor is also in scope:
+
+```rust
+struct ImplExample();
+impl ImplExample {
+    fn example() -> Self { // Self as a type
+        Self()             // Self as a value constructor
+    }
+}
+```

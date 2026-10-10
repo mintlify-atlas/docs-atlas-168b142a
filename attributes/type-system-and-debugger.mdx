@@ -1,0 +1,315 @@
+---
+title: "Type System and Debugger Attributes in Rust"
+sidebarTitle: "Type System Attrs"
+description: "Reference for Rust's type system attributes (#[non_exhaustive], #[repr]), compile-time limit attributes, and debugger visualization attributes."
+---
+
+Rust provides several attributes that influence how types are represented in memory, restrict how they can be used from downstream crates, control compile-time resource limits, and embed debugging aids for third-party debuggers like GDB and WinDbg.
+
+## Type System Attributes
+
+### `#[non_exhaustive]`
+
+The `#[non_exhaustive]` attribute signals that a struct, enum, or enum variant may gain additional fields or variants in future versions. It prevents outside code from exhaustively constructing or matching on the type without a wildcard, preserving backwards compatibility.
+
+`#[non_exhaustive]` uses the MetaWord syntax and may be applied to structs, enums, and enum variants.
+
+**Within the defining crate**, `#[non_exhaustive]` has no effect:
+
+```rust
+#[non_exhaustive]
+pub struct Config {
+    pub window_width: u16,
+    pub window_height: u16,
+}
+
+#[non_exhaustive]
+pub enum Error {
+    Message(String),
+    Other,
+}
+
+// Construction is fine within the defining crate.
+let config = Config { window_width: 640, window_height: 480 };
+
+// Exhaustive matching is fine within the defining crate.
+match Error::Other {
+    Error::Message(ref s) => {},
+    Error::Other => {},
+}
+```
+
+**Outside the defining crate**, restrictions apply:
+
+```rust,ignore
+use upstream::{Config, Error};
+
+// Cannot construct: new fields could be added.
+let config = Config { window_width: 640, window_height: 480 }; // ERROR
+
+// Cannot match exhaustively: new variants could be added.
+match error {
+    Error::Message(ref s) => {},
+    Error::Other => {},
+    // ERROR: must add `_ => {}` wildcard
+}
+
+// Must use `..` in struct patterns.
+if let Config { window_width, .. } = config {
+    // OK
+}
+```
+
+<Note>
+Non-exhaustive types are always considered inhabited in downstream crates. It is also an error to use numeric casts (`as`) on enums that contain any non-exhaustive variants when they are defined in another crate.
+</Note>
+
+Non-exhaustive enum variants also restrict outside construction and require `..` in struct patterns:
+
+```rust
+pub enum Message {
+    #[non_exhaustive] Send { from: u32, to: u32, contents: String },
+    #[non_exhaustive] Reaction(u32),
+    #[non_exhaustive] Quit,
+}
+```
+
+### `#[repr(...)]` — Type Layout
+
+The `#[repr]` attribute controls the memory layout of a type. Different repr options are appropriate for different use cases.
+
+#### `#[repr(C)]`
+
+Lays out the type using C-compatible rules. Essential for FFI and for types whose layout must be predictable:
+
+```rust
+#[repr(C)]
+struct CCompatible {
+    x: i32,
+    y: f64,
+}
+```
+
+#### `#[repr(transparent)]`
+
+A single-field struct or enum variant has the same layout and ABI as the single field. Used to create newtypes with no overhead:
+
+```rust
+#[repr(transparent)]
+struct Wrapper(u32);
+```
+
+#### `#[repr(packed)]` and `#[repr(packed(N))]`
+
+Removes padding between fields, optionally aligning each field to `N` bytes (default 1). Accessing packed fields may require `unsafe` on some architectures:
+
+```rust
+#[repr(packed)]
+struct Packed {
+    x: u8,
+    y: u32,  // Normally would have 3 bytes of padding before this
+}
+```
+
+#### `#[repr(align(N))]`
+
+Increases the alignment of the type to at least `N` bytes (`N` must be a power of two):
+
+```rust
+#[repr(align(16))]
+struct Aligned {
+    data: [u8; 8],
+}
+```
+
+#### Integer Reprs for Enums
+
+For enums, `#[repr(u8)]`, `#[repr(i32)]`, etc., specify the discriminant type. Combined with `#[repr(C)]`, this gives a C-compatible enum:
+
+```rust
+#[repr(u8)]
+enum Direction {
+    North = 0,
+    South = 1,
+    East  = 2,
+    West  = 3,
+}
+
+// C-compatible enum with explicit discriminant type
+#[repr(C, u8)]
+enum CEnum {
+    A(u32),
+    B(f32),
+}
+```
+
+## Limit Attributes
+
+### `#[recursion_limit = "N"]`
+
+The `#[recursion_limit]` attribute sets the maximum depth for potentially infinitely-recursive compile-time operations such as macro expansion and auto-dereferencing. It must be applied at the crate root and uses the MetaNameValueStr syntax.
+
+The default in `rustc` is 128.
+
+```rust,compile_fail
+#![recursion_limit = "4"]
+
+macro_rules! a {
+    () => { a!(1); };
+    (1) => { a!(2); };
+    (2) => { a!(3); };
+    (3) => { a!(4); };
+    (4) => { };
+}
+
+// This fails because it needs more than 4 levels of recursion.
+a!{}
+```
+
+```rust,compile_fail
+#![recursion_limit = "1"]
+
+// This fails because auto-deref requires two recursive steps.
+(|_: &u8| {})(&&&1);
+```
+
+<Tip>
+If you encounter "recursion limit reached" errors with complex macros or deeply nested types, increase the limit: `#![recursion_limit = "256"]`.
+</Tip>
+
+### `#[type_length_limit = "N"]`
+
+The `#[type_length_limit]` attribute sets the maximum number of type substitutions allowed when constructing a concrete type during monomorphization. It must be applied at the crate root.
+
+The default value in `rustc` is `1048576`.
+
+```rust,ignore
+#![type_length_limit = "4"]
+
+fn f<T>(x: T) {}
+
+// Fails: monomorphizing to the nested tuple type exceeds the limit.
+f(((((1,), 2), 3), 4));
+```
+
+<Note>
+`rustc` only enforces `type_length_limit` when the nightly `-Zenforce-type-length-limit` flag is active.
+</Note>
+
+## Debugger Attributes
+
+### `#[debugger_visualizer]`
+
+The `#[debugger_visualizer]` attribute embeds a debugger visualizer file into the binary's debug information, improving how types are displayed in debuggers. It uses the MetaListNameValueStr syntax and may be applied to a module or the crate root. Multiple uses are allowed; all specified visualizer files are loaded.
+
+```rust,ignore
+#![debugger_visualizer(natvis_file = "Example.natvis")]
+#![debugger_visualizer(gdb_script_file = "example.py")]
+```
+
+#### Natvis (Visual Studio / WinDbg)
+
+Natvis is an XML-based framework for Microsoft debuggers. It lets you define custom display rules for Rust types. Only supported on `-windows-msvc` targets.
+
+```rust,ignore
+#![debugger_visualizer(natvis_file = "Rectangle.natvis")]
+
+struct FancyRect {
+    x: f32,
+    y: f32,
+    dx: f32,
+    dy: f32,
+}
+```
+
+`Rectangle.natvis`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+    <Type Name="foo::FancyRect">
+      <DisplayString>({x},{y}) + ({dx}, {dy})</DisplayString>
+      <Expand>
+        <Synthetic Name="LowerLeft">
+          <DisplayString>({x}, {y})</DisplayString>
+        </Synthetic>
+        <Synthetic Name="UpperRight">
+          <DisplayString>({x + dx}, {y + dy})</DisplayString>
+        </Synthetic>
+      </Expand>
+    </Type>
+</AutoVisualizer>
+```
+
+Under WinDbg this would display `fancy_rect` as `(10.0, 10.0) + (5.0, 5.0)` with expandable sub-entries.
+
+#### GDB Pretty Printers
+
+GDB supports structured Python scripts called _pretty printers_ that describe how a type should be visualized. Embed these with `gdb_script_file`:
+
+```rust,ignore
+#![debugger_visualizer(gdb_script_file = "printer.py")]
+
+struct Person {
+    name: String,
+    age: i32,
+}
+```
+
+`printer.py`:
+
+```python
+import gdb
+
+class PersonPrinter:
+    "Print a Person"
+
+    def __init__(self, val):
+        self.val = val
+        self.name = val["name"]
+        self.age = int(val["age"])
+
+    def to_string(self):
+        return "{} is {} years old.".format(self.name, self.age)
+
+def lookup(val):
+    lookup_tag = val.type.tag
+    if lookup_tag is None:
+        return None
+    if "foo::Person" == lookup_tag:
+        return PersonPrinter(val)
+    return None
+
+gdb.current_objfile().pretty_printers.append(lookup)
+```
+
+When debugging the binary with GDB, `print bob` would then display `"Bob" is 10 years old.`
+
+<Note>
+Embedded pretty printers are not automatically loaded by GDB. You must add the binary to GDB's auto-load safe path, either via the `gdb -iex "add-auto-load-safe-path ..."` flag or by adding the path to `~/.config/gdb/gdbinit`.
+</Note>
+
+### `#[collapse_debuginfo]`
+
+The `#[collapse_debuginfo]` attribute controls whether code locations from a macro definition are collapsed into the macro's call site in debuginfo. This affects how a debugger steps through macro-expanded code.
+
+It may only be applied to `macro_rules!` definitions:
+
+```rust
+#[collapse_debuginfo(yes)]
+macro_rules! example {
+    () => {
+        println!("hello!");
+    };
+}
+```
+
+Available options:
+
+| Option | Effect |
+|--------|--------|
+| `yes` | Code locations in debuginfo are collapsed to the call site |
+| `no` | Code locations in debuginfo are not collapsed |
+| `external` | Collapse only when the macro comes from a different crate |
+
+The default behavior (without the attribute) is `external` for user-defined macros and `yes` for built-in macros. The `rustc` flag `-C collapse-macro-debuginfo` overrides both the default and any `#[collapse_debuginfo]` attributes.

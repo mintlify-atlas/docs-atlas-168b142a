@@ -1,0 +1,211 @@
+---
+title: "Modules and Crates: Rust's Code Organization Units"
+sidebarTitle: "Modules & Crates"
+description: "How Rust organizes code into crates and modules, covering inline and file-based modules, the module tree, path attributes, and extern crate."
+---
+
+Rust organizes code into a two-level hierarchy: _crates_ at the top, and _modules_ within each crate. A crate is the unit of compilation and linking — every `rustc` invocation processes exactly one crate and produces one output artifact (an executable or a library). Within a crate, modules form a nested tree that controls namespacing and visibility. Understanding how crates and modules relate is essential for structuring any non-trivial Rust project.
+
+## Crates and source files
+
+The compilation model centers on artifacts called _crates_. Each compilation processes a single crate in source form and, if successful, produces a single crate in binary form: either an executable or some sort of library.
+
+A crate contains a _tree_ of nested module scopes. The top level of this tree is a module that is anonymous (from the point of view of paths within the module) and any item within a crate has a canonical module path denoting its location within the crate's module tree.
+
+A Rust source file describes a module — its name and location in the module tree are defined from outside the source file, either by an explicit `mod` item in a referencing source file, or by the name of the crate itself.
+
+```rust
+// Crate-level inner attributes go at the top of lib.rs or main.rs
+#![crate_name = "projx"]
+#![crate_type = "lib"]
+#![warn(non_camel_case_types)]
+```
+
+### The `main` function
+
+A crate that contains a `main` function can be compiled to an executable. The `main` function must take no arguments, must not declare any trait or lifetime bounds, must not have any where clauses, and its return type must implement the `Termination` trait.
+
+```rust
+fn main() {}
+```
+
+```rust
+fn main() -> ! {
+    std::process::exit(0);
+}
+```
+
+```rust
+fn main() -> impl std::process::Termination {
+    std::process::ExitCode::SUCCESS
+}
+```
+
+The `main` function may also be an import from elsewhere:
+
+```rust
+mod foo {
+    pub fn bar() {
+        println!("Hello, world!");
+    }
+}
+use foo::bar as main;
+```
+
+<Note>
+Types with implementations of `Termination` in the standard library include `()`, `!`, `Infallible`, `ExitCode`, and `Result<T, E> where T: Termination, E: Debug`.
+</Note>
+
+## Modules
+
+A _module item_ is a module surrounded in braces, named, and prefixed with the keyword `mod`. A module item introduces a new, named module into the tree of modules making up a crate. Modules can nest arbitrarily.
+
+```rust
+mod math {
+    type Complex = (f64, f64);
+
+    fn sin(f: f64) -> f64 {
+        // ...
+        unimplemented!()
+    }
+    fn cos(f: f64) -> f64 {
+        // ...
+        unimplemented!()
+    }
+    fn tan(f: f64) -> f64 {
+        // ...
+        unimplemented!()
+    }
+}
+```
+
+Modules are defined in the [type namespace] of the module or block where they are located. It is an error to define multiple items with the same name in the same namespace within a module.
+
+<Note>
+The `unsafe` keyword is syntactically allowed before the `mod` keyword but is rejected at a semantic level. This allows macros to consume the syntax and make use of the `unsafe` keyword before removing it from the token stream.
+</Note>
+
+## Module source filenames
+
+A module without a body (terminated with `;` instead of `{ ... }`) is loaded from an external file. When the module does not have a `path` attribute, the path to the file mirrors the logical module path.
+
+Ancestor module path components become directories, and the module's contents are in a file with the name of the module plus the `.rs` extension:
+
+| Module Path | Filesystem Path | File Contents |
+|---|---|---|
+| `crate` | `lib.rs` | `mod util;` |
+| `crate::util` | `util.rs` | `mod config;` |
+| `crate::util::config` | `util/config.rs` | |
+
+Module filenames may also be the name of the module as a directory with the contents in a file named `mod.rs` within that directory. The above example could also use `util/mod.rs` for `crate::util`. It is not allowed to have both `util.rs` and `util/mod.rs`.
+
+<Note>
+Prior to `rustc` 1.30, using `mod.rs` files was the way to load a module with nested children. The newer naming convention (e.g., `util.rs` alongside a `util/` directory for sub-modules) is now preferred as it avoids many files named `mod.rs` within a project.
+</Note>
+
+## The `path` attribute
+
+The directories and files used for loading external file modules can be influenced with the `path` attribute. For `path` attributes on modules not inside inline module blocks, the file path is relative to the directory the source file is located:
+
+```rust,ignore
+#[path = "foo.rs"]
+mod c;
+```
+
+| Source File | `c`'s File Location | `c`'s Module Path |
+|---|---|---|
+| `src/a/b.rs` | `src/a/foo.rs` | `crate::a::b::c` |
+| `src/a/mod.rs` | `src/a/foo.rs` | `crate::a::c` |
+
+For `path` attributes inside inline module blocks, the relative location depends on whether the source file is a "mod-rs" file (root modules like `lib.rs` or `main.rs`, and modules with `mod.rs`) or a "non-mod-rs" file:
+
+```rust,ignore
+mod inline {
+    #[path = "other.rs"]
+    mod inner;
+}
+```
+
+| Source File | `inner`'s File Location | `inner`'s Module Path |
+|---|---|---|
+| `src/a/b.rs` | `src/a/b/inline/other.rs` | `crate::a::b::inline::inner` |
+| `src/a/mod.rs` | `src/a/inline/other.rs` | `crate::a::inline::inner` |
+
+The `path` attribute can also be combined with inline modules that contain further nested modules:
+
+```rust,ignore
+#[path = "thread_files"]
+mod thread {
+    // Load the `local_data` module from `thread_files/tls.rs` relative to
+    // this source file's directory.
+    #[path = "tls.rs"]
+    mod local_data;
+}
+```
+
+## Attributes on modules
+
+Modules accept outer attributes (placed before the `mod` keyword) and inner attributes (placed after `{` for a module with a body, or at the beginning of the source file after the optional BOM and shebang).
+
+The built-in attributes that have meaning on a module are:
+
+- `cfg` — conditional compilation
+- `deprecated` — deprecation notices
+- `doc` — documentation
+- `path` — override the file path for an external module
+- `no_implicit_prelude` — disable the implicit prelude for this module
+- Lint check attributes (e.g., `allow`, `warn`, `deny`, `forbid`)
+
+## Extern crate declarations
+
+An `extern crate` declaration specifies a dependency on an external crate. The external crate is then bound into the declaring scope as the given identifier in the type namespace. If the `extern crate` appears in the crate root, the crate name is also added to the extern prelude, making it automatically in scope in all modules.
+
+```rust,ignore
+extern crate pcre;
+
+extern crate std; // equivalent to: extern crate std as std;
+
+extern crate std as ruststd; // linking to 'std' under another name
+```
+
+The `as` clause can rename the imported crate:
+
+```rust,ignore
+// Cargo packages using hyphens: hyphen replaced with underscore
+extern crate hello_world;
+```
+
+<Note>
+In the 2018 edition and later, `extern crate` declarations are rarely needed because the extern prelude is automatically populated with dependencies declared in `Cargo.toml`. They remain useful for specific scenarios like linking without importing names.
+</Note>
+
+An external crate dependency can also be declared without binding its name in scope using an underscore, which is useful for crates that only need to be linked:
+
+```rust,ignore
+extern crate foo as _;
+```
+
+### The `no_link` attribute
+
+The `no_link` attribute may be applied to an `extern crate` item to prevent linking the crate (for example, when only the macros of a crate are needed):
+
+```rust,ignore
+#[no_link]
+extern crate other_crate;
+
+other_crate::some_macro!();
+```
+
+## Module visibility and the `crate_name` attribute
+
+The `crate_name` attribute may be applied at the crate level to specify the name of the crate:
+
+```rust
+#![crate_name = "mycrate"]
+```
+
+The crate name must not be empty and must only contain Unicode alphanumeric characters or `_`.
+
+<Tip>
+When writing tests, it is common to create a private `mod test` directly inside the module under test. Because `mod test` is a descendant of the module being tested, it can access private items of the parent module — making it easy to test internal implementation details without exposing them.
+</Tip>

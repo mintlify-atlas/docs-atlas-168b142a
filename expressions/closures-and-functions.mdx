@@ -1,0 +1,245 @@
+---
+title: "Closures, Call, and Method Call Expressions in Rust"
+sidebarTitle: "Closures & Calls"
+description: "Rust closures, move and async closures, Fn/FnMut/FnOnce traits, function call expressions, method call auto-deref, and field access expressions explained."
+---
+
+Closures, function calls, and method calls are the primary mechanisms for invoking computations in Rust. Closures capture their environment, making them more flexible than plain functions. Method calls use a sophisticated auto-deref and auto-ref mechanism to find the right implementation. This page covers all three expression forms and field access expressions.
+
+## Closure Expressions
+
+A *closure expression* (also called a lambda expression) defines a closure type and evaluates to a value of that type. Closure expressions can optionally capture variables from their enclosing scope — something regular function definitions cannot do.
+
+### Syntax
+
+```
+async? move? (|| | | ClosureParameters? |) (Expression | -> ReturnType BlockExpression)
+```
+
+```rust
+fn ten_times<F>(f: F) where F: Fn(i32) {
+    for index in 0..10 {
+        f(index);
+    }
+}
+
+ten_times(|j| println!("hello, {}", j));
+
+// With type annotations
+ten_times(|j: i32| -> () { println!("hello, {}", j) });
+```
+
+Each closure expression has a **unique, anonymous type** — no two closures have the same type even if they have identical source code.
+
+### Capture Modes
+
+Without the `move` keyword, the compiler infers how to capture each variable, preferring the least powerful borrow:
+
+1. **By shared reference** (`&T`) — if the closure only reads the variable.
+2. **By mutable reference** (`&mut T`) — if the closure mutates the variable.
+3. **By value** (move or copy) — if the closure needs to own the value.
+
+```rust
+let word = "konnichiwa".to_owned();
+ten_times(move |j| println!("{}, {}", word, j));
+```
+
+With the `move` keyword, all referenced variables are moved (or copied for `Copy` types) into the closure. This is often used to ensure the closure has a `'static` lifetime:
+
+```rust
+let msg = String::from("hello");
+let closure = move || println!("{}", msg);
+// `msg` is now owned by the closure
+closure();
+```
+
+### The `Fn`, `FnMut`, and `FnOnce` Traits
+
+Which calling traits the closure type implements depends on how variables are captured:
+
+- **`FnOnce`** — Can be called at least once. Implemented by all closures. A closure that moves out of a captured variable implements only `FnOnce`.
+- **`FnMut`** — Can be called multiple times, mutating captured variables. Implemented by closures that don't move out of captured variables.
+- **`Fn`** — Can be called multiple times without mutation. Implemented by closures that only capture by shared reference or are `Copy`.
+
+```rust
+// FnOnce: takes ownership of s
+let s = String::from("hello");
+let consume = move || drop(s);
+consume(); // can only call once
+
+// FnMut: mutates captured variable
+let mut count = 0;
+let mut increment = || { count += 1; count };
+println!("{}", increment()); // 1
+println!("{}", increment()); // 2
+
+// Fn: only shared reference
+let greeting = String::from("hi");
+let say = || println!("{}", greeting);
+say();
+say(); // can call any number of times
+```
+
+<Note>
+  The closure type also implements `Send` and `Sync` if the type of every captured variable implements the respective trait.
+</Note>
+
+### Async Closures
+
+Closures marked with the `async` keyword are asynchronous. Calling the async closure does not perform any work, but instead evaluates to a value implementing `Future`.
+
+```rust
+async fn takes_async_callback(f: impl AsyncFn(u64)) {
+    f(0).await;
+    f(1).await;
+}
+
+async fn example() {
+    takes_async_callback(async |i| {
+        core::future::ready(i).await;
+        println!("done with {i}.");
+    }).await;
+}
+```
+
+<Note>
+  Async closures are only available beginning with Rust 2018.
+</Note>
+
+---
+
+## Function Call Expressions
+
+A *call expression* calls a function. The function operand is evaluated first, then the argument operands are evaluated left to right, and finally the function is called.
+
+```rust
+fn add(x: i32, y: i32) -> i32 { x + y }
+let three: i32 = add(1i32, 2i32);
+let name: &'static str = (|| "Rust")();
+```
+
+For non-function types, `f(...)` invokes one of the calling traits depending on the context:
+
+| Trait | Receiver |
+|-------|----------|
+| `Fn` / `AsyncFn` | Shared reference |
+| `FnMut` / `AsyncFnMut` | Mutable reference |
+| `FnOnce` / `AsyncFnOnce` | Owned value |
+
+An automatic borrow is taken if needed. The function operand is also automatically dereferenced as required.
+
+### Disambiguating Function Calls
+
+When multiple in-scope traits define methods with the same name, or when distinguishing between a smart pointer and its referent, use the fully-qualified syntax:
+
+```rust
+trait Pretty { fn print(&self); }
+trait Ugly    { fn print(&self); }
+
+struct Foo;
+impl Pretty for Foo { fn print(&self) {} }
+
+struct Bar;
+impl Pretty for Bar { fn print(&self) {} }
+impl Ugly   for Bar { fn print(&self) {} }
+
+fn main() {
+    let f = Foo;
+    let b = Bar;
+
+    // Only one `print` for Foo — all these work:
+    f.print();
+    Foo::print(&f);
+    <Foo as Pretty>::print(&f);
+
+    // Two `print` methods for Bar — must qualify:
+    // b.print(); // ERROR: multiple `print` found
+    <Bar as Pretty>::print(&b);
+}
+```
+
+---
+
+## Method Call Expressions
+
+A *method call* consists of a receiver expression, a single dot, a method path segment, and a parenthesized argument list.
+
+```rust
+let pi: Result<f32, _> = "3.14".parse();
+let log_pi = pi.unwrap_or(1.0).log(2.72);
+```
+
+### Auto-Deref and Auto-Ref
+
+When looking up a method, Rust automatically dereferences and borrows the receiver to find a matching implementation. The lookup builds a list of **candidate receiver types** by:
+
+1. Repeatedly dereferencing the receiver's type, adding each type encountered.
+2. Attempting an unsized coercion at the end and adding the result type if successful.
+3. For each candidate type `T`, also adding `&T` and `&mut T`.
+
+For example, with receiver type `Box<[i32; 2]>`, the candidates are:
+`Box<[i32;2]>`, `&Box<[i32;2]>`, `&mut Box<[i32;2]>`, `[i32; 2]`, `&[i32; 2]`, `&mut [i32; 2]`, `[i32]`, `&[i32]`, `&mut [i32]`.
+
+For each candidate type, Rust searches for a visible method with that receiver type in:
+1. The type's inherent methods.
+2. Methods provided by any visible trait implemented by the type (trait bounds are checked first for type parameters).
+
+<Warning>
+  For trait objects, if an inherent method has the same name as a trait method, the compiler will error. Use disambiguating function call syntax to call the trait method instead.
+</Warning>
+
+<Note>
+  The lookup order can occasionally surprise. `&self` methods are found before `&mut self` methods for the same candidate type.
+</Note>
+
+---
+
+## Field Access Expressions
+
+A *field expression* evaluates to the location of a field of a struct or union. It is a place expression.
+
+```rust
+mystruct.myfield;
+foo().x;
+(Struct { a: 10, b: 20 }).a;
+(mystruct.function_field)() // parenthesized to avoid method call parsing
+```
+
+Field expressions cannot be followed by a parenthesized argument list — that would be parsed as a method call. Wrap the field expression in parentheses to use it in a call expression:
+
+```rust
+struct HoldsCallable<F: Fn()> { callable: F }
+let holds_callable = HoldsCallable { callable: || () };
+
+// holds_callable.callable(); // Invalid: parsed as method call
+(holds_callable.callable)(); // Valid: field expression then call
+```
+
+### Automatic Dereferencing
+
+If the container operand's type implements `Deref` (or `DerefMut` for mutable access), Rust *automatically dereferences* as many times as necessary to make the field access possible:
+
+```rust
+use std::boxed::Box;
+struct Point { x: f64, y: f64 }
+let boxed_point = Box::new(Point { x: 1.0, y: 2.0 });
+// Auto-deref through Box to access the field:
+println!("{}", boxed_point.x);
+```
+
+### Borrowing Fields Independently
+
+Fields of a struct or reference to a struct are treated as **separate entities** when borrowing. If the struct doesn't implement `Drop` and is stored in a local variable, you can borrow or move out of individual fields independently:
+
+```rust
+struct A { f1: String, f2: String, f3: String }
+let mut x: A = A {
+    f1: "f1".to_string(),
+    f2: "f2".to_string(),
+    f3: "f3".to_string(),
+};
+let a: &mut String = &mut x.f1; // x.f1 borrowed mutably
+let b: &String = &x.f2;         // x.f2 borrowed immutably
+let c: &String = &x.f2;         // can borrow again
+let d: String = x.f3;           // move out of x.f3
+```

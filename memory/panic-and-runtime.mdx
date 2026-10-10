@@ -1,0 +1,205 @@
+---
+title: "Panic Behavior and the Rust Runtime"
+sidebarTitle: "Panic & Runtime"
+description: "How Rust panics work, the unwind vs abort panic strategy, catch_unwind, the global allocator, and no_std panic handler requirements."
+---
+
+Rust provides a mechanism to prevent a function from returning normally: *panicking*. A panic is a response to an error condition that is typically not expected to be recoverable within the context in which it is encountered. Unlike exceptions in some languages, panics are not intended for ordinary control flow — they signal that something has gone fundamentally wrong. Understanding when and how panics occur, how they propagate through the call stack, and how they interact with the runtime is essential for writing robust Rust programs and especially for `no_std` and embedded development.
+
+## What is a Panic?
+
+A panic is triggered when a Rust program encounters an unrecoverable error condition. Some language constructs trigger panics automatically — for example, an out-of-bounds array index panics:
+
+```rust
+let v = vec![1, 2, 3];
+let _ = v[10]; // panics: index out of bounds
+```
+
+The standard library also provides the [`panic!`](https://doc.rust-lang.org/std/macro.panic.html) macro for explicit panics:
+
+```rust
+fn divide(a: i32, b: i32) -> i32 {
+    if b == 0 {
+        panic!("cannot divide by zero!");
+    }
+    a / b
+}
+```
+
+Other panicking operations include `unwrap()` on `None` or `Err`, `expect()`, integer overflow in debug mode, and various arithmetic intrinsics.
+
+## The `panic_handler` Attribute
+
+The `#[panic_handler]` attribute applies to a function that defines what happens when a panic occurs. The function must have the signature `fn(&PanicInfo) -> !`.
+
+There must be **exactly one** `panic_handler` function in the entire dependency graph.
+
+```rust,ignore
+#![no_std]
+
+use core::fmt::{self, Write};
+use core::panic::PanicInfo;
+
+struct Sink {
+    _0: (),
+}
+
+impl Sink {
+    fn new() -> Sink { Sink { _0: () } }
+}
+
+impl fmt::Write for Sink {
+    fn write_str(&mut self, _: &str) -> fmt::Result { Ok(()) }
+}
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    let mut sink = Sink::new();
+    // logs "panicked at '$reason', src/main.rs:27:4" to some `sink`
+    let _ = writeln!(sink, "{}", info);
+    loop {}
+}
+```
+
+The [`PanicInfo`](https://doc.rust-lang.org/core/panic/struct.PanicInfo.html) struct contains information about the location of the panic and its message.
+
+### Standard Library Panic Handlers
+
+When linking with `std`, two panic handlers are available:
+
+| Handler | Behavior |
+|---------|----------|
+| `unwind` | Unwinds the stack; the panic is potentially recoverable |
+| `abort`  | Terminates the process immediately; non-recoverable |
+
+Not all targets support the `unwind` handler.
+
+<Note>
+The panic handler can be selected with the `-C panic` flag to `rustc`. The default for most targets is `unwind`. The standard library's panic behavior can be modified at runtime using [`std::panic::set_hook`](https://doc.rust-lang.org/std/panic/fn.set_hook.html).
+</Note>
+
+Linking a `no_std` binary, dylib, cdylib, or staticlib **requires specifying your own panic handler**.
+
+## Panic Strategy
+
+The *panic strategy* defines the kind of panic behavior a crate is compiled to support:
+
+- **`unwind`** (default for most targets): the compiler generates unwinding tables; panics can propagate up the call stack.
+- **`abort`**: panics immediately terminate the process; no unwinding infrastructure is generated, which can yield smaller and faster code.
+
+<Note>
+When compiling with the `abort` panic strategy, the optimizer may assume that unwinding across Rust frames is impossible. This can result in both code-size and runtime speed improvements.
+</Note>
+
+## Unwinding
+
+When a panic occurs with the `unwind` handler, Rust *unwinds* the call stack — similar to how C++'s `throw` unwinds C++ frames — until the panic reaches a recovery point (such as a thread boundary). As the panic traverses Rust frames, live objects that implement `Drop` have their `drop` methods called. When normal execution resumes, no-longer-accessible objects have been cleaned up just as if they had gone out of scope normally.
+
+<Warning>
+**Unwinding Safety**: Code that uses `unsafe` must be careful to maintain its invariants in the presence of panics. If an `unsafe` operation is in the middle of modifying data when a panic unwinds through it, data structures may be left in an inconsistent state. Use `std::panic::catch_unwind` with caution, and ensure your code is *unwind-safe*.
+</Warning>
+
+### Catching Panics with `catch_unwind`
+
+The standard library provides two mechanisms for recovering from a panic:
+
+1. [`std::panic::catch_unwind`](https://doc.rust-lang.org/std/panic/fn.catch_unwind.html) — recovers from a panic within the same thread:
+
+```rust
+use std::panic;
+
+let result = panic::catch_unwind(|| {
+    println!("no problem here");
+});
+assert!(result.is_ok());
+
+let result = panic::catch_unwind(|| {
+    panic!("oh no!");
+});
+assert!(result.is_err());
+```
+
+2. [`std::thread::spawn`](https://doc.rust-lang.org/std/thread/fn.spawn.html) — spawns a new thread and automatically sets up panic recovery so that panics in the child thread do not bring down the entire program:
+
+```rust
+use std::thread;
+
+let handle = thread::spawn(|| {
+    panic!("child thread panics");
+});
+
+// The main thread can detect the panic via join:
+match handle.join() {
+    Ok(_) => println!("thread finished normally"),
+    Err(_) => println!("thread panicked"),
+}
+```
+
+### Unwinding Across FFI Boundaries
+
+It is possible to unwind across FFI boundaries using an appropriate ABI declaration (e.g., `extern "C-unwind"`). Unwinding with the wrong ABI is **undefined behavior**:
+
+- Causing an unwind into Rust code from a foreign function declared with a non-unwinding ABI (such as `"C"`, `"system"`, etc.) is UB — for example, a C++ exception uncaught in C++ code that propagates into Rust.
+- Calling a Rust `extern` function that unwinds from code compiled with `-fno-exceptions` is UB.
+
+Catching a foreign unwinding operation (such as a C++ exception) using `catch_unwind` or by letting it propagate beyond the Rust `main()` function will either abort the process or return a `Result::Err` containing an opaque type — which behavior occurs is unspecified.
+
+## The Rust Runtime
+
+### `global_allocator`
+
+The `#[global_allocator]` attribute selects the global memory allocator. It may only be applied to a `static` item whose type implements [`GlobalAlloc`](https://doc.rust-lang.org/alloc/alloc/trait.GlobalAlloc.html):
+
+```rust
+use core::alloc::{GlobalAlloc, Layout};
+use std::alloc::System;
+
+struct MyAllocator;
+
+unsafe impl GlobalAlloc for MyAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        unsafe { System.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static GLOBAL: MyAllocator = MyAllocator;
+```
+
+The `global_allocator` attribute may only be used once in the entire crate graph.
+
+### `windows_subsystem`
+
+On Windows targets, the `#[windows_subsystem]` attribute sets the subsystem for the resulting binary:
+
+```rust
+#![windows_subsystem = "windows"]
+```
+
+Accepted values are `"console"` (the default, attaches to or creates a console window) and `"windows"` (runs detached from any console, commonly used by GUI applications). This attribute is ignored on non-Windows targets and non-`bin` crate types.
+
+## Panic Handlers in `no_std`
+
+In `no_std` environments (embedded systems, OS kernels, WebAssembly without WASI), there is no standard library panic handler. You must provide your own using `#[panic_handler]`:
+
+```rust,ignore
+#![no_std]
+#![no_main]
+
+use core::panic::PanicInfo;
+
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    // On embedded, you might blink an LED or halt the CPU:
+    loop {}
+}
+```
+
+<Warning>
+In `no_std` binaries, dylibs, cdylibs, and staticlibs, **you must provide a panic handler**. Failing to do so will result in a linker error.
+</Warning>
+
+The panic strategy (`abort` or `unwind`) is chosen via the `-C panic` compiler flag and affects which handler is used and how the compiler generates code.

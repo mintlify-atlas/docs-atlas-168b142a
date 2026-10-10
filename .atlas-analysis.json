@@ -1,0 +1,160 @@
+{
+  "projectType": "general",
+  "projectName": "The Rust Reference",
+  "projectDescription": "The official primary reference for the Rust programming language, covering syntax, semantics, types, memory model, unsafety, and all language constructs in formal detail.",
+  "theme": "maple",
+  "primaryColor": "#428bca",
+  "lightColor": "#241c1c",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Reference",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": [
+              "introduction",
+              "notation"
+            ]
+          },
+          {
+            "group": "Lexical Structure",
+            "pages": [
+              "lexical-structure/input-format",
+              "lexical-structure/keywords-and-identifiers",
+              "lexical-structure/tokens",
+              "lexical-structure/comments-and-whitespace"
+            ]
+          },
+          {
+            "group": "Items & Declarations",
+            "pages": [
+              "items/overview",
+              "items/modules-and-crates",
+              "items/functions",
+              "items/structs-enums-unions",
+              "items/traits-and-implementations",
+              "items/generics-and-associated-items",
+              "items/constants-and-statics",
+              "items/use-and-extern"
+            ]
+          },
+          {
+            "group": "Expressions & Statements",
+            "pages": [
+              "expressions/overview",
+              "expressions/literals-paths-blocks",
+              "expressions/operators",
+              "expressions/collections",
+              "expressions/closures-and-functions",
+              "expressions/control-flow",
+              "expressions/async-and-await"
+            ]
+          },
+          {
+            "group": "Patterns",
+            "pages": [
+              "patterns"
+            ]
+          },
+          {
+            "group": "Type System",
+            "pages": [
+              "types/primitive-types",
+              "types/compound-types",
+              "types/pointer-and-function-types",
+              "types/trait-objects-and-impl-trait",
+              "type-system/layout-and-coercions",
+              "type-system/traits-bounds-and-lifetimes",
+              "type-system/special-types-and-traits"
+            ]
+          },
+          {
+            "group": "Macros",
+            "pages": [
+              "macros/macros-by-example",
+              "macros/procedural-macros"
+            ]
+          },
+          {
+            "group": "Attributes",
+            "pages": [
+              "attributes/overview",
+              "attributes/testing-and-derive",
+              "attributes/diagnostics-and-codegen",
+              "attributes/type-system-and-debugger"
+            ]
+          },
+          {
+            "group": "Names & Visibility",
+            "pages": [
+              "names/namespaces-and-scopes",
+              "names/paths-and-resolution",
+              "names/visibility-and-privacy",
+              "names/preludes"
+            ]
+          },
+          {
+            "group": "Memory, Runtime & Linkage",
+            "pages": [
+              "memory/memory-model",
+              "memory/variables-and-destructors",
+              "memory/panic-and-runtime",
+              "memory/linkage-and-abi",
+              "memory/inline-assembly"
+            ]
+          },
+          {
+            "group": "Unsafety",
+            "pages": [
+              "unsafety/overview",
+              "unsafety/undefined-behavior",
+              "unsafety/const-evaluation"
+            ]
+          },
+          {
+            "group": "Appendices",
+            "pages": [
+              "appendices/glossary",
+              "appendices/syntax-index",
+              "appendices/influences"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Comprehensive formal specification of Rust language syntax and semantics",
+    "Detailed type system coverage: primitives, compound types, trait objects, generics, lifetimes",
+    "Full items reference: functions, structs, enums, unions, traits, implementations, modules",
+    "Expression and statement reference with operator semantics and precedence",
+    "Pattern matching specification including destructuring and match ergonomics",
+    "Macro system: declarative macros-by-example and procedural macros",
+    "Attribute reference: testing, derive, diagnostics, code generation, type system",
+    "Name resolution, namespaces, scopes, paths, and visibility rules",
+    "Memory model, variable lifetimes, destructors, and interior mutability",
+    "Unsafety model: undefined behavior, raw pointers, unsafe traits, and FFI",
+    "Inline assembly specification",
+    "ABI, linkage, and runtime behavior",
+    "Conditional compilation and the cfg system",
+    "Constant evaluation rules"
+  ],
+  "publicApiSurface": [
+    "Lexical tokens: keywords, identifiers, literals, punctuation",
+    "Item declarations: fn, struct, enum, union, trait, impl, mod, use, extern crate, static, const, type",
+    "Expression forms: block, operator, closure, loop, match, if/else, async/await, return",
+    "Pattern kinds: literal, identifier, wildcard, range, reference, struct, tuple, slice, or-patterns",
+    "Type kinds: bool, numeric, char, str, never, tuple, array, slice, struct, enum, union, fn item, closure, pointer, fn pointer, trait object, impl trait, type parameter",
+    "Attribute namespaces: #[test], #[derive], #[cfg], #[allow/warn/deny/forbid], #[inline], #[repr], #[target_feature]",
+    "Macro invocation syntax and macro_rules! pattern matching",
+    "Procedural macro types: function-like, derive, attribute",
+    "Visibility modifiers: pub, pub(crate), pub(super), pub(in path)",
+    "Lifetime and trait bounds syntax",
+    "unsafe keyword usage: blocks, functions, traits, impl, extern",
+    "Inline assembly (asm!, global_asm!)",
+    "Conditional compilation: cfg!, #[cfg], #[cfg_attr]",
+    "Constant evaluation: const fn, const blocks, static initializers"
+  ]
+}

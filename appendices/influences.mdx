@@ -1,0 +1,284 @@
+---
+title: "Languages That Influenced Rust's Design"
+sidebarTitle: "Influences"
+description: "The programming languages that shaped Rust: type systems, memory models, concurrency, macros, and syntactic choices with their origins."
+---
+
+Rust is not a particularly original language. Its design deliberately synthesizes the best ideas from a wide range of programming languages and systems research, combining them in a novel way around the central goals of safety, performance, and ergonomics. Many of the features that make Rust distinctive — its ownership model, algebraic data types, zero-cost abstractions, and hygienic macros — have clear predecessors in earlier languages. This page documents the acknowledged language influences on Rust's design, including some elements that have since been removed from the language.
+
+## SML and OCaml
+
+<CardGroup cols={1}>
+<Card title="SML / OCaml" icon="code">
+**Contributions**: Algebraic data types, pattern matching, type inference, semicolon statement separation.
+
+Rust's `enum` types — with variants that can carry data — are directly inspired by algebraic data types from the ML family of languages. A Rust `enum` with data-carrying variants is essentially a tagged union, the same construct that SML calls a *datatype* and Haskell calls an *algebraic data type*.
+
+```rust
+// Rust's enum mirrors ML-style algebraic data types:
+enum Shape {
+    Circle(f64),
+    Rectangle(f64, f64),
+    Triangle { base: f64, height: f64 },
+}
+
+fn area(s: &Shape) -> f64 {
+    match s {
+        Shape::Circle(r) => std::f64::consts::PI * r * r,
+        Shape::Rectangle(w, h) => w * h,
+        Shape::Triangle { base, height } => 0.5 * base * height,
+    }
+}
+```
+
+Rust's `match` expression is similarly inspired by ML's `match`, with exhaustiveness checking ensuring all cases are handled. Rust's type inference, while implemented differently, is philosophically descended from Hindley-Milner type inference as used in SML and OCaml.
+</Card>
+</CardGroup>
+
+## C++
+
+<CardGroup cols={1}>
+<Card title="C++" icon="code">
+**Contributions**: References, RAII (Resource Acquisition Is Initialization), smart pointers, move semantics, monomorphization, memory model.
+
+Rust's relationship with C++ is deep and intentional. RAII — the pattern where resource cleanup is tied to object lifetime and destructor invocation — is the foundation of Rust's ownership model. When a Rust value goes out of scope, its `Drop::drop` is called, just as a C++ destructor is called when a scoped object is destroyed.
+
+```rust
+// RAII in Rust: file is closed when `_file` is dropped
+use std::fs::File;
+
+fn read_config() {
+    let _file = File::open("config.toml").unwrap();
+    // ... use file ...
+} // File::drop() called here — file handle is closed
+```
+
+Move semantics in Rust — transferring ownership by moving a value into a new binding — are directly inspired by C++11's move semantics and rvalue references. Rust's generics are monomorphized (a separate copy of code is generated for each concrete type instantiation), exactly as C++ templates are instantiated.
+
+Rust's `Box<T>`, `Rc<T>`, and `Arc<T>` are analogous to C++'s `unique_ptr`, `shared_ptr`, and atomic `shared_ptr`, respectively.
+</Card>
+</CardGroup>
+
+## ML Kit and Cyclone
+
+<CardGroup cols={1}>
+<Card title="ML Kit / Cyclone" icon="code">
+**Contributions**: Region-based memory management.
+
+Cyclone was a research language from AT&T Labs that explored safe systems programming by introducing *regions* — named lifetime regions that the compiler could track to ensure references did not escape the region they were allocated in. This work directly influenced Rust's lifetime system.
+
+Rust's lifetimes (`'a`, `'b`, `'static`) are Rust's equivalent of Cyclone's regions: every reference has a lifetime that scopes its validity, and the borrow checker ensures references do not outlive their data.
+
+```rust
+// Lifetimes make the region (scope) of references explicit:
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() { x } else { y }
+}
+```
+</Card>
+</CardGroup>
+
+## Haskell (GHC)
+
+<CardGroup cols={1}>
+<Card title="Haskell (GHC)" icon="code">
+**Contributions**: Typeclasses, type families.
+
+Haskell's *typeclasses* are the direct predecessor of Rust's *traits*. A typeclass (or trait) defines an interface — a set of methods — that a type can implement. Rust's trait system, including default implementations, associated types, and bounded generics, is strongly influenced by Haskell's typeclass system.
+
+```rust
+// Rust trait ≈ Haskell typeclass
+trait Describable {
+    fn describe(&self) -> String;
+    // default implementation:
+    fn print_description(&self) {
+        println!("{}", self.describe());
+    }
+}
+```
+
+Haskell's *type families* — type-level functions that map types to types — inspired Rust's *associated types* in traits. Rust's `Iterator::Item` associated type is an example: it maps each implementor to its specific item type.
+
+```rust
+trait Container {
+    type Item; // associated type, inspired by type families
+    fn get(&self, index: usize) -> Option<&Self::Item>;
+}
+```
+</Card>
+</CardGroup>
+
+## Newsqueak, Alef, and Limbo
+
+<CardGroup cols={1}>
+<Card title="Newsqueak / Alef / Limbo" icon="code">
+**Contributions**: Channels, concurrency.
+
+These languages from Bell Labs (precursors to Go's concurrency model) influenced Rust's early concurrency design. Channels as a message-passing primitive — sending values between concurrent tasks — were explored in these languages and influenced Rust's `std::sync::mpsc` channel API.
+
+```rust
+use std::sync::mpsc;
+use std::thread;
+
+let (tx, rx) = mpsc::channel();
+
+thread::spawn(move || {
+    tx.send(42).unwrap();
+});
+
+let received = rx.recv().unwrap();
+println!("Got: {}", received);
+```
+</Card>
+</CardGroup>
+
+## Erlang
+
+<CardGroup cols={1}>
+<Card title="Erlang" icon="code">
+**Contributions**: Message passing, thread failure isolation.
+
+Erlang's *let it crash* philosophy — where processes are lightweight, isolated, and expected to fail independently — influenced Rust's threading model. In Rust, a panic in one thread does not automatically bring down other threads; threads are failure-isolated by default.
+
+```rust
+use std::thread;
+
+// A panicking thread does not kill the main thread:
+let handle = thread::spawn(|| {
+    panic!("this thread panics");
+});
+
+// The main thread can detect and handle the failure:
+match handle.join() {
+    Ok(_) => println!("thread finished normally"),
+    Err(_) => println!("thread panicked — but we handled it"),
+}
+```
+
+Note: Some earlier Rust designs explored *linked thread failure* (where a parent thread would automatically fail when a child thread failed), inspired by Erlang supervisors, but this was removed from the language.
+</Card>
+</CardGroup>
+
+## Swift
+
+<CardGroup cols={1}>
+<Card title="Swift" icon="code">
+**Contributions**: Optional bindings (`if let`, `while let`).
+
+Swift introduced the `if let` pattern for safely unwrapping optional values without panicking. Rust adopted a generalization of this pattern: `if let` and `while let` work with any irrefutable pattern, not just optionals.
+
+```rust
+let maybe_value: Option<i32> = Some(42);
+
+// Optional binding inspired by Swift:
+if let Some(value) = maybe_value {
+    println!("Got: {}", value);
+}
+
+// while let for iterative pattern matching:
+let mut stack = vec![1, 2, 3];
+while let Some(top) = stack.pop() {
+    println!("{}", top);
+}
+```
+</Card>
+</CardGroup>
+
+## Scheme
+
+<CardGroup cols={1}>
+<Card title="Scheme" icon="code">
+**Contributions**: Hygienic macros.
+
+Scheme introduced *hygienic macros* — macros whose generated identifiers do not accidentally capture or be captured by identifiers in the surrounding code. Rust's `macro_rules!` system is directly inspired by this approach, ensuring that macros can introduce new bindings without interfering with the code that invokes them.
+
+```rust
+macro_rules! swap {
+    ($a:expr, $b:expr) => {
+        // The `tmp` binding is hygienic — it does not conflict
+        // with any `tmp` the caller might have in scope:
+        let tmp = $a;
+        $a = $b;
+        $b = tmp;
+    };
+}
+```
+</Card>
+</CardGroup>
+
+## C#
+
+<CardGroup cols={1}>
+<Card title="C#" icon="code">
+**Contributions**: Attributes.
+
+Rust's attribute system (`#[derive(Debug)]`, `#[cfg(target_os = "linux")]`, `#[test]`, etc.) is directly inspired by C#'s attribute system. Attributes annotate items with metadata that can be acted upon by the compiler, the linker, or custom procedural macros.
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+#[repr(C)]
+struct Point {
+    x: f64,
+    y: f64,
+}
+```
+</Card>
+</CardGroup>
+
+## Ruby
+
+<CardGroup cols={1}>
+<Card title="Ruby" icon="code">
+**Contributions**: Closure syntax.
+
+Rust's closure syntax — particularly the use of `|parameters|` to delimit closure arguments — is borrowed from Ruby.
+
+```rust
+let numbers = vec![1, 2, 3, 4, 5];
+
+// The |x| closure syntax is inspired by Ruby blocks:
+let doubled: Vec<i32> = numbers.iter().map(|x| x * 2).collect();
+```
+
+Note: Ruby's *block syntax* (the `do ... end` / `{ ... }` syntax) was also considered in early Rust designs but was not adopted.
+</Card>
+</CardGroup>
+
+## NIL and Hermes
+
+<CardGroup cols={1}>
+<Card title="NIL / Hermes" icon="code">
+**Contributions**: Typestate (now removed).
+
+NIL and Hermes were research languages that explored *typestate* — the idea that the type of a value could encode its current state, allowing the type system to enforce state machine transitions. Early Rust designs incorporated typestate, but it was removed before version 1.0 as it added significant complexity.
+
+The influence of typestate thinking can still be seen in Rust in a more limited form: the builder pattern, session types via type-level state machines, and the use of move semantics to enforce "use once" constraints are all inspired by typestate ideas.
+</Card>
+</CardGroup>
+
+## Unicode Annex #31
+
+<CardGroup cols={1}>
+<Card title="Unicode Annex #31" icon="code">
+**Contributions**: Identifier and pattern syntax.
+
+Rust's identifier syntax (what characters are allowed in names) follows [Unicode Annex #31](http://www.unicode.org/reports/tr31/), the Unicode Standard Annex for identifier and pattern syntax. This enables Rust programs to use identifiers from a wide range of scripts and languages, not just ASCII.
+</Card>
+</CardGroup>
+
+## Summary
+
+| Influence | Key Contribution |
+|-----------|----------------|
+| SML / OCaml | Algebraic data types, pattern matching, type inference |
+| C++ | RAII, move semantics, smart pointers, monomorphization |
+| Cyclone / ML Kit | Region-based memory (lifetimes) |
+| Haskell (GHC) | Typeclasses (traits), associated types (type families) |
+| Newsqueak / Alef / Limbo | Channels and concurrency primitives |
+| Erlang | Thread isolation, message passing |
+| Swift | Optional bindings (`if let`, `while let`) |
+| Scheme | Hygienic macros (`macro_rules!`) |
+| C# | Attribute system |
+| Ruby | Closure syntax (`\|params\|`) |
+| NIL / Hermes | Typestate (explored, then removed) |
+| Unicode Annex #31 | Identifier syntax |

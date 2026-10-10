@@ -1,0 +1,521 @@
+---
+title: "Patterns in Rust: Destructuring and Match Ergonomics"
+sidebarTitle: "Patterns"
+description: "A complete reference for all Rust pattern kinds: literals, identifiers, wildcards, ranges, references, structs, slices, or-patterns, and match ergonomics."
+---
+
+Patterns are used to match values against structures and, optionally, bind variables to values inside those structures. They appear in variable declarations, function and closure parameters, `match` expressions, `if let` expressions, `while let` expressions, and `for` loops. A pattern may simultaneously test a value's shape, extract subfields, and apply binding modes — all in one expression.
+
+The following comprehensive example illustrates several capabilities at once: testing for optional presence, matching a range, binding a reference, and ignoring remaining fields with `..`:
+
+```rust
+# struct Car;
+# struct Computer;
+# struct Person {
+#     name: String,
+#     car: Option<Car>,
+#     computer: Option<Computer>,
+#     age: u8,
+# }
+# let person = Person {
+#     name: String::from("John"),
+#     car: Some(Car),
+#     computer: None,
+#     age: 15,
+# };
+if let
+    Person {
+        car: Some(_),
+        age: person_age @ 13..=19,
+        name: ref person_name,
+        ..
+    } = person
+{
+    println!("{} has a car and is {} years old.", person_name, person_age);
+}
+```
+
+## Refutability
+
+A pattern is *refutable* when it may fail to match the value it is tested against. An *irrefutable* pattern always matches. For example, `(x, y)` is irrefutable, but `(a, 3)` is refutable:
+
+```rust
+let (x, y) = (1, 2);               // "(x, y)" is an irrefutable pattern
+
+if let (a, 3) = (1, 2) {           // "(a, 3)" is refutable, and will not match
+    panic!("Shouldn't reach here");
+} else if let (a, 4) = (3, 4) {    // "(a, 4)" is refutable, and will match
+    println!("Matched ({}, 4)", a);
+}
+```
+
+## Destructuring
+
+Patterns can *destructure* structs, enums, and tuples, breaking a value into its component pieces. The syntax for destructuring closely mirrors construction syntax. A wildcard `_` stands in for a single field while `..` stands in for all remaining fields of a variant.
+
+When destructuring a data structure with named fields, you may write `fieldname` as a shorthand for `fieldname: fieldname`:
+
+```rust
+# enum Message {
+#     Quit,
+#     WriteString(String),
+#     Move { x: i32, y: i32 },
+#     ChangeColor(u8, u8, u8),
+# }
+# let message = Message::Quit;
+match message {
+    Message::Quit => println!("Quit"),
+    Message::WriteString(write) => println!("{}", &write),
+    Message::Move{ x, y: 0 } => println!("move {} horizontally", x),
+    Message::Move{ .. } => println!("other move"),
+    Message::ChangeColor { 0: red, 1: green, 2: _ } => {
+        println!("color change, red: {}, green: {}", red, green);
+    }
+};
+```
+
+---
+
+## Literal Patterns
+
+Literal patterns match a value that is exactly equal to the literal. Because negative numbers are not literals, a literal pattern may be prefixed with an optional minus sign.
+
+<Warning>
+C string and raw C string literals are accepted in literal patterns syntactically, but `&CStr` does not implement structural equality and any such `match` will be rejected with a type error.
+</Warning>
+
+Literal patterns are always **refutable**.
+
+```rust
+for i in -2..5 {
+    match i {
+        -1 => println!("It's minus one"),
+        1 => println!("It's a one"),
+        2|4 => println!("It's either a two or a four"),
+        _ => println!("Matched none of the arms"),
+    }
+}
+```
+
+---
+
+## Identifier Patterns
+
+Identifier patterns bind the value they match to a variable in the value namespace. The identifier must be unique within the pattern. By default, identifier patterns bind by copy or move depending on whether the matched type implements `Copy`.
+
+```rust
+let mut variable = 10;
+fn sum(x: i32, y: i32) -> i32 {
+#    x + y
+# }
+```
+
+### Binding with `@`
+
+Use `variable @ subpattern` to both test a subpattern and bind the matched value:
+
+```rust
+let x = 2;
+
+match x {
+    e @ 1 ..= 5 => println!("got a range element {}", e),
+    _ => println!("anything"),
+}
+```
+
+### `ref` and `ref mut`
+
+Use `ref` to bind by reference instead of by copy/move, and `ref mut` to bind by mutable reference:
+
+```rust
+# let a = Some(10);
+match a {
+    None => (),
+    Some(value) => (),
+}
+
+match a {
+    None => (),
+    Some(ref value) => (),
+}
+```
+
+In the second match, `value` is bound as a `&i32` reference. The `ref` keyword is needed because `&` cannot be applied to subfields in a destructuring pattern:
+
+```rust
+# struct Person {
+#    name: String,
+#    age: u8,
+# }
+# let value = Person { name: String::from("John"), age: 23 };
+if let Person { name: ref person_name, age: 18..=150 } = value { }
+```
+
+### Binding Modes (Match Ergonomics)
+
+When a reference value is matched by a non-reference pattern, the compiler automatically treats the binding as `ref` or `ref mut`. This is called *match ergonomics* and is the default binding mode:
+
+```rust
+let x: &Option<i32> = &Some(3);
+if let Some(y) = x {
+    // y was converted to `ref y` and its type is &i32
+}
+```
+
+Each time a reference is matched using a non-reference pattern, the value is automatically dereferenced and the default binding mode updates:
+
+- Matching a shared reference (`&T`) sets the mode to `ref`.
+- Matching a mutable reference (`&mut T`) sets the mode to `ref mut`, unless the mode is already `ref`.
+
+<Note>
+In the 2024 edition, bindings may only explicitly specify `ref`, `ref mut`, or `mut` when the default binding mode is "move". Before the 2024 edition, you could redundantly write `ref` even in `ref`-mode.
+</Note>
+
+Move and reference bindings can be mixed within the same pattern, resulting in a *partial move*:
+
+```rust
+# struct Person {
+#    name: String,
+#    age: u8,
+# }
+# let person = Person{ name: String::from("John"), age: 23 };
+// `name` is moved from person and `age` referenced
+let Person { name, ref age } = person;
+```
+
+---
+
+## Wildcard Pattern
+
+The wildcard pattern (`_`) matches any single value without binding or consuming it. Unlike identifier patterns, `_` does not copy, move, or borrow the value it matches.
+
+The wildcard pattern is always **irrefutable**.
+
+```rust
+# let x = 20;
+let (a, _) = (10, x);   // the x is always matched by _
+
+// ignore a function/closure param
+let real_part = |a: f64, _: f64| { a };
+
+// ignore a field from a struct
+# struct RGBA {
+#    r: f32,
+#    g: f32,
+#    b: f32,
+#    a: f32,
+# }
+# let color = RGBA{r: 0.4, g: 0.1, b: 0.9, a: 0.5};
+let RGBA{r: red, g: green, b: blue, a: _} = color;
+
+// accept any Some, with any value
+# let x = Some(10);
+if let Some(_) = x {}
+```
+
+---
+
+## Rest Pattern
+
+The rest pattern (`..`) matches zero or more elements that have not already been matched. It may only appear once in tuple, tuple struct, and slice patterns, and also in identifier patterns for slice patterns.
+
+The rest pattern is always **irrefutable**.
+
+```rust
+# let words = vec!["a", "b", "c"];
+# let slice = &words[..];
+match slice {
+    [] => println!("slice is empty"),
+    [one] => println!("single element {}", one),
+    [head, tail @ ..] => println!("head={} tail={:?}", head, tail),
+}
+
+match slice {
+    // Ignore everything but the last element, which must be "!"
+    [.., "!"] => println!("!!!"),
+
+    // `start` is a slice of everything except the last element, which must be "z"
+    [start @ .., "z"] => println!("starts with: {:?}", start),
+
+    // `end` is a slice of everything but the first element, which must be "a"
+    ["a", end @ ..] => println!("ends with: {:?}", end),
+
+    // 'whole' is the entire slice and `last` is the final element
+    whole @ [.., last] => println!("the last element of {:?} is {}", whole, last),
+
+    rest => println!("{:?}", rest),
+}
+
+# let tuple = (1, 2, 3, 4, 5);
+// Rest pattern in tuple patterns
+match tuple {
+    (1, .., y, z) => println!("y={} z={}", y, z),
+    (.., 5) => println!("tail must be 5"),
+    (..) => println!("matches everything else"),
+}
+```
+
+---
+
+## Range Patterns
+
+Range patterns match scalar values within a range defined by their bounds. Rust supports multiple range sigils:
+
+| Pattern | Meaning |
+|---------|---------|
+| `a..=b` | Inclusive: values from `a` to `b` (including `b`) |
+| `a..b`  | Exclusive: values from `a` up to but not including `b` |
+| `a..`   | From `a` upwards (no upper bound) |
+| `..b`   | Up to but not including `b` (no lower bound) |
+| `..=b`  | Up to and including `b` (no lower bound) |
+
+Range bounds may be character, byte, integer, or float literals, or paths to constants. Float ranges may not use `NaN` as a bound.
+
+<Note>
+Before the 2021 edition, inclusive ranges could be written with `...` instead of `..=`. This syntax is semantically invalid in the 2021 edition and beyond.
+</Note>
+
+```rust
+# let c = 'f';
+let valid_variable = match c {
+    'a'..='z' => true,
+    'A'..='Z' => true,
+    'α'..='ω' => true,
+    _ => false,
+};
+
+# let ph = 10;
+println!("{}", match ph {
+    0..7 => "acid",
+    7 => "neutral",
+    8..=14 => "base",
+    _ => unreachable!(),
+});
+
+# let uint: u32 = 5;
+match uint {
+    0 => "zero!",
+    1.. => "positive number!",
+};
+
+// Using paths to constants:
+# const TROPOSPHERE_MIN : u8 = 6;
+# const TROPOSPHERE_MAX : u8 = 20;
+# const STRATOSPHERE_MIN : u8 = TROPOSPHERE_MAX + 1;
+# const STRATOSPHERE_MAX : u8 = 50;
+# const MESOSPHERE_MIN : u8 = STRATOSPHERE_MAX + 1;
+# const MESOSPHERE_MAX : u8 = 85;
+# let altitude = 70;
+println!("{}", match altitude {
+    TROPOSPHERE_MIN..=TROPOSPHERE_MAX => "troposphere",
+    STRATOSPHERE_MIN..=STRATOSPHERE_MAX => "stratosphere",
+    MESOSPHERE_MIN..=MESOSPHERE_MAX => "mesosphere",
+    _ => "outer space, maybe",
+});
+```
+
+Range patterns for fixed-width integer and `char` types are **irrefutable** when they span the entire set of possible values (e.g., `0u8..=255u8`).
+
+---
+
+## Reference Patterns
+
+Reference patterns dereference the pointers being matched, thereby borrowing them. They are written as `&pat` or `&mut pat`.
+
+Reference patterns are always **irrefutable**.
+
+```rust
+let int_reference = &3;
+
+let a = match *int_reference { 0 => "zero", _ => "some" };
+let b = match int_reference { &0 => "zero", _ => "some" };
+
+assert_eq!(a, b);
+```
+
+<Note>
+The grammar token `&&` is a single token, not two `&` tokens. To match a reference to a reference, use `&&pat`.
+</Note>
+
+<Note>
+In the 2024 edition, reference patterns may only appear when the default binding mode is "move". Before the 2024 edition, reference patterns could appear even when the default binding mode was not "move".
+</Note>
+
+---
+
+## Struct Patterns
+
+Struct patterns match struct, enum, and union values that satisfy all of their sub-patterns. Fields are referenced by name (or by index for tuple structs), and `..` ignores remaining fields.
+
+```rust
+# struct Point {
+#     x: u32,
+#     y: u32,
+# }
+# let s = Point {x: 1, y: 1};
+match s {
+    Point {x: 10, y: 20} => (),
+    Point {y: 10, x: 20} => (),    // order doesn't matter
+    Point {x: 10, ..} => (),
+    Point {..} => (),
+}
+```
+
+When matching without `..`, all fields must be specified:
+
+```rust
+# struct Struct {
+#    a: i32,
+#    b: char,
+#    c: bool,
+# }
+# let struct_value = Struct{a: 10, b: 'X', c: false};
+let Struct { a, b, c } = struct_value;
+```
+
+A struct pattern used to match a union must specify exactly one field.
+
+---
+
+## Tuple Struct Patterns
+
+Tuple struct patterns match tuple structs and tuple-like enum variants by position. They use parentheses after the path instead of braces:
+
+```rust
+# enum Color {
+#     Rgb(u8, u8, u8),
+#     Transparent,
+# }
+# let color = Color::Rgb(255, 0, 128);
+match color {
+    Color::Rgb(r, g, b) => println!("red={}, green={}, blue={}", r, g, b),
+    Color::Transparent => println!("transparent"),
+}
+```
+
+---
+
+## Tuple Patterns
+
+Tuple patterns destructure a tuple value by position. The special form `(..)` with only a rest pattern matches a tuple of any size.
+
+The tuple pattern is **refutable** when one of its sub-patterns is refutable.
+
+```rust
+let pair = (10, "ten");
+let (a, b) = pair;
+
+assert_eq!(a, 10);
+assert_eq!(b, "ten");
+```
+
+---
+
+## Grouped Patterns
+
+Parentheses can disambiguate compound patterns. For example, `&0..=5` is ambiguous (does `&` bind tighter than `..=`?), but `&(0..=5)` is unambiguous:
+
+```rust
+let int_reference = &3;
+match int_reference {
+    &(0..=5) => (),
+    _ => (),
+}
+```
+
+---
+
+## Slice Patterns
+
+Slice patterns can match both fixed-size arrays and dynamic slices. They use `[...]` syntax and support the rest pattern `..` for variable-length segments.
+
+```rust
+// Fixed size
+let arr = [1, 2, 3];
+match arr {
+    [1, _, _] => "starts with one",
+    [a, b, c] => "starts with something else",
+};
+```
+
+```rust
+// Dynamic size
+let v = vec![1, 2, 3];
+match v[..] {
+    [a, b] => { /* this arm will not apply because the length doesn't match */ }
+    [a, b, c] => { /* this arm will apply */ }
+    _ => { /* this wildcard is required, since the length is not known statically */ }
+};
+```
+
+<Note>
+Within a slice, a range pattern without both bounds must be enclosed in parentheses — e.g., `(a..)` — to make clear it matches a single element. A range with both bounds, like `a..=b`, does not require parentheses.
+</Note>
+
+Slice patterns are **irrefutable** when matching an array as long as every element pattern is irrefutable. When matching a slice, they are irrefutable only in the single `..` form.
+
+---
+
+## Path Patterns
+
+Path patterns refer to constants, structs, or enum variants that have no fields. Unqualified path patterns can refer to enum variants, structs, constants, and associated constants. Qualified path patterns can only refer to associated constants.
+
+```rust
+const EXPECTED_VALUE: u8 = 42;
+
+fn check_value(x: u8) -> Result<u8, u8> {
+    match x {
+        EXPECTED_VALUE => Ok(x),   // PathPattern resolving to the constant 42
+        other_value => Err(x),     // IdentifierPattern
+    }
+}
+
+assert_eq!(check_value(42), Ok(42));
+assert_eq!(check_value(43), Err(43));
+```
+
+### Constant Patterns
+
+When a constant `C` of type `T` is used as a pattern, `T` must implement `PartialEq` and the value of `C` must have *recursive structural equality*:
+
+- Integers, `str`, `bool`, and `char` values always have structural equality.
+- Tuples, arrays, and slices have structural equality if all elements do.
+- References have structural equality if the pointed-to value does.
+- A `struct` or `enum` value has structural equality if it derives `PartialEq` and all fields do.
+- Float values have structural equality if they are not `NaN`.
+
+---
+
+## Or-Patterns
+
+Or-patterns match if any one of their sub-patterns matches. They are written using `|` between sub-patterns and can be nested arbitrarily.
+
+```rust
+for i in -2..5 {
+    match i {
+        -1 => println!("It's minus one"),
+        1 => println!("It's a one"),
+        2|4 => println!("It's either a two or a four"),
+        _ => println!("Matched none of the arms"),
+    }
+}
+```
+
+Or-patterns are valid anywhere a [Pattern] is accepted, except in `let` bindings and function/closure parameters (which require [PatternNoTopAlt]).
+
+<Warning>
+Or-patterns always have the lowest precedence. `x @ A(..) | B(..)` is an error because `x` is not bound in all sub-patterns. `&A(x) | B(x)` is an error due to a type mismatch between sub-patterns.
+</Warning>
+
+For an or-pattern `p | q` to be well-formed:
+1. The inferred types of `p` and `q` must unify.
+2. Both sub-patterns must introduce the same set of bindings.
+3. Bindings with the same name must have the same type and binding mode in both sub-patterns.
+
+For exhaustiveness checking, a pattern `p | q` covers both `p` and `q`. The distributive law applies: `c(p | q, ..rest)` covers the same set of values as `c(p, ..rest) | c(q, ..rest)`.
+
+---
+
+## Macro-Generated Patterns
+
+Patterns can also be produced by macro invocations (`MacroInvocation`). The expanded result must be a valid pattern in the position where the macro is used.

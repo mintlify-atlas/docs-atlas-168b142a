@@ -1,0 +1,62 @@
+---
+title: "Rust Source File Input Format and Unicode Encoding"
+sidebarTitle: "Input Format"
+description: "How Rust source files are read and normalized: UTF-8 encoding, byte order mark removal, CRLF normalization, shebang handling, and tokenization."
+---
+
+Before a Rust source file can be parsed into tokens, the compiler applies a sequence of well-defined transformations to the raw byte sequence. These transformations normalize the input so that the rest of the lexer can operate on a clean, consistent stream of Unicode scalar values. This chapter describes that pipeline from raw bytes to the sequence of characters ready for tokenization.
+
+## Source Encoding
+
+Every Rust source file is interpreted as a sequence of Unicode characters encoded in **UTF-8**.
+
+<Warning>
+  It is a hard error if the file is not valid UTF-8. The compiler will reject any source file that contains invalid UTF-8 byte sequences.
+</Warning>
+
+The formal grammar for the characters allowed in source input is:
+
+```
+CHAR -> [U+0000-U+D7FF U+E000-U+10FFFF]  // a Unicode scalar value
+ASCII -> [U+0000-U+007F]
+NUL -> U+0000
+EOF -> !CHAR  // End of file or input
+```
+
+This means every code point except the surrogate range `U+D800`–`U+DFFF` is a valid source character. Surrogate code points are not Unicode scalar values and cannot appear in valid UTF-8.
+
+## Byte Order Mark Removal
+
+If the very first character of the decoded UTF-8 stream is `U+FEFF` (the Unicode **BYTE ORDER MARK**, also known as BOM), it is silently removed from the input sequence before any further processing. This allows editors that prepend a BOM to UTF-8 files (common on Windows) to produce valid Rust source without any special handling.
+
+## CRLF Normalization
+
+Every pair of characters `U+000D` (CR) immediately followed by `U+000A` (LF) is replaced by a single `U+000A` (LF). This normalization happens in a single pass — it is **not** applied repeatedly. As a result, after normalization a `CR LF` sequence produced by double-line-endings such as `CR CR LF LF` may still contain a bare `CR` followed by `LF`.
+
+Other occurrences of `U+000D` (CR) that are not immediately followed by `U+000A` (LF) are left in place and are treated as [whitespace](/lexical-structure/comments-and-whitespace).
+
+## Shebang Removal
+
+If a shebang line is present at the start of the file, it is removed from the input sequence and otherwise ignored by the compiler. A shebang starts with `#!` and extends through the first `U+000A` (LF) or through end-of-file if no LF is present. The line is **not** treated as a shebang if the `#!` characters are immediately followed by `[` (ignoring any intervening whitespace or non-doc block comments), as that would be the syntax for an inner attribute.
+
+A typical shebang line for a Rust script looks like:
+
+```rust
+#!/usr/bin/env rustx
+
+fn main() {
+    println!("Hello!");
+}
+```
+
+<Note>
+  The shebang may appear immediately at the start of the file or after the optional byte order mark.
+</Note>
+
+## Tokenization
+
+After the four transformations above (UTF-8 decoding, BOM removal, CRLF normalization, and shebang removal), the resulting character sequence is converted into a stream of tokens as described in the rest of the lexical structure chapters.
+
+<Note>
+  The standard library [`include!`](https://doc.rust-lang.org/std/macro.include.html) macro applies byte order mark removal, CRLF normalization, and shebang removal (when invoked in an item context) to the file it reads. The [`include_str!`](https://doc.rust-lang.org/std/macro.include_str.html) and [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) macros do **not** apply these transformations — they expose the raw file contents.
+</Note>

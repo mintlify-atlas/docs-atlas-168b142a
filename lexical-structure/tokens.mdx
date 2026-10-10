@@ -1,0 +1,327 @@
+---
+title: "Rust Lexical Tokens: Literals, Operators, and Punctuation"
+sidebarTitle: "Tokens"
+description: "Complete reference to Rust's token types: integer, float, character, string, byte, boolean, and lifetime literals, plus all punctuation and delimiters."
+---
+
+Tokens are the primitive productions of Rust's grammar — the smallest meaningful units produced by the lexer before any syntactic analysis takes place. Every Rust source file is a sequence of tokens drawn from a small number of well-defined categories. This chapter describes each token kind in detail, including all literal forms, valid escape sequences, suffixes, punctuation symbols, and delimiters.
+
+## Token Kinds
+
+Rust source input is broken down into the following kinds of tokens:
+
+- **Keywords** — reserved words such as `fn`, `let`, `match`
+- **Identifiers** — user-defined names
+- **Literals** — compile-time constant values
+- **Lifetimes** — `'a`, `'static`, and loop labels
+- **Punctuation** — operators and separators
+- **Delimiters** — `{}`, `[]`, `()`
+
+## Literals
+
+Literals are tokens used directly in [literal expressions](https://doc.rust-lang.org/reference/expressions/literal-expr.html).
+
+### Quick Reference Tables
+
+#### Characters and Strings
+
+| Kind | Example | `#` sets | Characters | Escapes |
+|---|---|---|---|---|
+| Character | `'H'` | 0 | All Unicode | Quote & ASCII & Unicode |
+| String | `"hello"` | 0 | All Unicode | Quote & ASCII & Unicode |
+| Raw string | `r#"hello"#` | \<256 | All Unicode | N/A |
+| Byte | `b'H'` | 0 | All ASCII | Quote & Byte |
+| Byte string | `b"hello"` | 0 | All ASCII | Quote & Byte |
+| Raw byte string | `br#"hello"#` | \<256 | All ASCII | N/A |
+| C string | `c"hello"` | 0 | All Unicode | Quote & Byte & Unicode |
+| Raw C string | `cr#"hello"#` | \<256 | All Unicode | N/A |
+
+The number of `#` characters on each side of a raw literal must match.
+
+#### ASCII Escapes
+
+| Escape | Meaning |
+|---|---|
+| `\x41` | 7-bit character code (exactly 2 hex digits, up to `0x7F`) |
+| `\n` | Newline |
+| `\r` | Carriage return |
+| `\t` | Tab |
+| `\\` | Backslash |
+| `\0` | Null |
+
+#### Byte Escapes
+
+| Escape | Meaning |
+|---|---|
+| `\x7F` | 8-bit character code (exactly 2 hex digits) |
+| `\n` | Newline |
+| `\r` | Carriage return |
+| `\t` | Tab |
+| `\\` | Backslash |
+| `\0` | Null |
+
+#### Unicode Escapes
+
+| Escape | Meaning |
+|---|---|
+| `\u{7FFF}` | 24-bit Unicode code point (up to 6 hex digits) |
+
+#### Quote Escapes
+
+| Escape | Meaning |
+|---|---|
+| `\'` | Single quote |
+| `\"` | Double quote |
+
+#### Number Literals
+
+| Kind | Example | Exponent |
+|---|---|---|
+| Decimal integer | `98_222` | N/A |
+| Hex integer | `0xff` | N/A |
+| Octal integer | `0o77` | N/A |
+| Binary integer | `0b1111_0000` | N/A |
+| Floating-point | `123.0E+77` | Optional |
+
+All number literals allow `_` as a visual separator: `1_234.0E+18f64`.
+
+---
+
+### Character Literals
+
+A *character literal* is a single Unicode character enclosed within two `U+0027` (single-quote) characters. The single-quote itself must be escaped as `\'`. Character literals may contain any Unicode scalar value except an unescaped single-quote, backslash, line feed, carriage return, or tab.
+
+```rust
+let c1 = 'a';
+let c2 = '\'';          // escaped single quote
+let c3 = '\n';          // newline
+let c4 = '\x41';        // ASCII 'A'
+let c5 = '\u{1F600}';   // 😀 (U+1F600)
+```
+
+---
+
+### String Literals
+
+A *string literal* is a sequence of any Unicode characters enclosed within two `U+0022` (double-quote) characters. The double-quote must be escaped as `\"`. A `\` immediately before a line break causes the line break to be omitted from the string value (string continuation escape).
+
+```rust
+let s1 = "hello, world";
+let s2 = "She said, \"hi!\"";
+let s3 = "line one \
+          line one continued";  // continuation escape — no newline in the string
+```
+
+---
+
+### Raw String Literals
+
+Raw string literals do not process any escapes. They begin with `r` followed by zero or more `#` characters and a `"`, and end with a matching `"` and the same number of `#` characters.
+
+```rust
+"foo"; r"foo";                     // foo
+"\"foo\""; r#""foo""#;             // "foo"
+
+"foo #\"# bar";
+r##"foo #"# bar"##;                // foo #"# bar
+
+"\x52"; "R"; r"R";                 // R
+"\\x52"; r"\x52";                  // \x52
+```
+
+---
+
+### Byte Literals
+
+A *byte literal* is a single ASCII character (U+0000 to U+007F) or a byte escape, prefixed with `b'` and closed with `'`. It is equivalent to a `u8` integer literal.
+
+```rust
+let b1 = b'A';
+let b2 = b'\'';   // escaped single quote
+let b3 = b'\x7F'; // DEL character
+```
+
+---
+
+### Byte String Literals
+
+A *byte string literal* is a sequence of ASCII characters and escapes, prefixed with `b"` and closed with `"`. It produces a `&[u8]` value.
+
+```rust
+b"foo"; br"foo";                     // foo
+b"\"foo\""; br#""foo""#;             // "foo"
+
+b"\x52"; b"R"; br"R";                // R
+b"\\x52"; br"\x52";                  // \x52
+```
+
+---
+
+### C String Literals
+
+A *C string literal* is a sequence of Unicode characters and escapes, prefixed with `c"` and closed with `"`. C strings are implicitly terminated by a `0x00` byte, and the null byte may not appear anywhere else within the literal.
+
+```rust
+// These three C string literals are equivalent:
+c"æ";         // LATIN SMALL LETTER AE (U+00E6)
+c"\u{00E6}";
+c"\xC3\xA6";
+```
+
+<Note>
+  C string literals require the **2021 edition** or later. In earlier editions, `c""` is lexed as `c ""` (the identifier `c` followed by a string literal).
+</Note>
+
+---
+
+### Integer Literals
+
+An *integer literal* has one of four forms:
+
+- **Decimal**: starts with a decimal digit — `98_222`, `0`, `123`
+- **Hexadecimal**: `0x` prefix — `0xff`, `0xFF_u8`, `0x01_f32`
+- **Octal**: `0o` prefix — `0o70`, `0o70_i16`
+- **Binary**: `0b` prefix — `0b1111_0000`, `0b________1`
+
+```rust
+#![allow(overflowing_literals)]
+123;
+123i32;
+123u32;
+123_u32;
+
+0xff;
+0xff_u8;
+0x01_f32; // integer 7986, not floating-point 1.0
+0x01_e3;  // integer 483, not floating-point 1000.0
+
+0o70;
+0o70_i16;
+
+0b1111_1111_1001_0000;
+0b1111_1111_1001_0000i64;
+0b________1;
+
+0usize;
+```
+
+Note that `-1i8` is analyzed as two tokens: `-` followed by `1i8`.
+
+<Warning>
+  Certain integer literal forms are invalid and are rejected by the tokenizer rather than split into separate tokens:
+
+  ```rust,compile_fail
+  0b0102;  // not `0b010` followed by `2`
+  0o1279;  // not `0o127` followed by `9`
+  0x80.0;  // not `0x80` followed by `.0`
+  0b101e;  // not a suffixed literal
+  0b;      // not an integer literal
+  ```
+</Warning>
+
+#### Valid Integer Suffixes
+
+| Integer suffixes | Floating-point suffixes |
+|---|---|
+| `u8`, `i8`, `u16`, `i16`, `u32`, `i32`, `u64`, `i64`, `u128`, `i128`, `usize`, `isize` | `f32`, `f64` |
+
+---
+
+### Floating-Point Literals
+
+A *floating-point literal* has one of two forms:
+
+- A decimal literal followed by `.`, optionally followed by another decimal and/or an exponent.
+- A decimal literal followed directly by an exponent.
+
+```rust
+123.0f64;
+0.1f64;
+0.1f32;
+12E+99_f64;
+let x: f64 = 2.;
+```
+
+Note that `2.f64` would be interpreted as calling a method named `f64` on `2`. Use `2.0f64` instead.
+
+```rust,compile_fail
+2e;   // error: exponent with no digits
+2.0e; // error: exponent with no digits
+```
+
+---
+
+### Boolean Literals
+
+The boolean type has exactly two literal values, both of which are strict keywords:
+
+```rust
+let t: bool = true;
+let f: bool = false;
+```
+
+---
+
+## Lifetimes and Loop Labels
+
+Lifetime tokens use the form `'identifier` and are used for lifetime parameters and loop labels:
+
+```rust
+fn longest<'a>(x: &'a str, y: &'a str) -> &'a str {
+    if x.len() > y.len() { x } else { y }
+}
+
+'outer: loop {
+    'inner: loop {
+        break 'outer;
+    }
+}
+```
+
+Raw lifetimes follow the same idea as raw identifiers — they are prefixed with `'r#` and allow strict or reserved keywords to be used as lifetime names:
+
+<Note>
+  Raw lifetimes are accepted in the **2021 edition** or later. In earlier editions, `'r#lt` is lexed as `'r # lt`.
+</Note>
+
+---
+
+## Literal Suffixes
+
+A suffix is a sequence of characters immediately following (without whitespace) a literal, with the same form as a non-raw identifier or keyword. Any literal with any suffix is valid as a token and can be passed to a macro:
+
+```rust
+macro_rules! blackhole { ($tt:tt) => () }
+macro_rules! blackhole_lit { ($l:literal) => () }
+
+blackhole!("string"suffix); // OK
+blackhole_lit!(1suffix);    // OK
+```
+
+However, suffixes on literals used as literal expressions or patterns are restricted to the table above. Any suffix on a non-numeric literal (string, character, byte, etc.) used as an expression is rejected.
+
+---
+
+## Punctuation
+
+Punctuation tokens serve as operators, separators, and structural markers throughout Rust's grammar:
+
+```
+...   ..=   <<=   >>=   !=    %=    &&    &=    *=    +=
+-=    ->    ..    /=    ::    <<    <=    ==    =>    >=
+>>    ^=    |=    ||    !     #     $     %     &     *
++     ,     -     .     /     :     ;     <     =     >
+?     @     [     ]     ^     {     |     }     ~
+```
+
+---
+
+## Delimiters
+
+Bracket punctuation always appears in matched pairs. The contents between an open and close bracket, together with the brackets themselves, form a *token tree* used extensively in macros:
+
+| Bracket | Type |
+|---|---|
+| `{` `}` | Curly braces |
+| `[` `]` | Square brackets |
+| `(` `)` | Parentheses |

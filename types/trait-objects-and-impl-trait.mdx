@@ -1,0 +1,218 @@
+---
+title: "Trait Objects and impl Trait in Rust"
+sidebarTitle: "Trait Objects"
+description: "Reference for dyn Trait objects (fat pointer, vtable, object safety), impl Trait in argument and return position, and differences between the two forms."
+---
+
+Rust provides two ways to work with types that implement a trait without naming the concrete type: *trait objects* (`dyn Trait`) and *impl Trait*. Trait objects enable runtime polymorphism (dynamic dispatch) through a vtable, while `impl Trait` is resolved at compile time through monomorphization. Understanding the differences is key to writing idiomatic Rust.
+
+---
+
+## Trait Objects (`dyn Trait`)
+
+A trait object is an opaque value of another type that implements a set of traits. The set consists of a *base trait* — which must be [dyn compatible](#object-safety) — plus any number of auto traits and at most one lifetime.
+
+Valid trait object types include:
+
+- `dyn Trait`
+- `dyn Trait + Send`
+- `dyn Trait + Send + Sync`
+- `dyn Trait + 'static`
+- `dyn Trait + Send + 'static`
+
+### Fat Pointer and vtable
+
+Because the concrete type of a trait object is erased at compile time, trait objects are [dynamically sized types (DSTs)](/type-system/layout-and-coercions#dynamically-sized-types). They are always used behind some pointer. Each instance of a pointer to a trait object contains two fields:
+
+1. A pointer to an instance of a type `T` that implements the trait.
+2. A pointer to a *virtual method table (vtable)*, which contains function pointers for each method of the trait (and its supertraits) that `T` implements.
+
+Calling a method on a trait object results in *virtual dispatch*: the correct function pointer is loaded from the vtable at runtime. This allows different concrete types to be stored behind the same pointer type:
+
+```rust
+trait Printable {
+    fn stringify(&self) -> String;
+}
+
+impl Printable for i32 {
+    fn stringify(&self) -> String { self.to_string() }
+}
+
+fn print(a: Box<dyn Printable>) {
+    println!("{}", a.stringify());
+}
+
+fn main() {
+    print(Box::new(10) as Box<dyn Printable>);
+}
+```
+
+### Object Safety
+
+Not every trait can be used as a trait object. A trait is *dyn compatible* (previously called "object safe") if its methods can be dispatched through a vtable. A trait is dyn compatible when, among other requirements:
+
+- All methods are dispatchable through a vtable (e.g., no generic type parameters in methods, no `Self: Sized` bounds where `Self` is not the receiver type).
+- The trait does not require `Self: Sized`.
+
+<Note>
+If you attempt to use a trait that is not dyn compatible as a trait object, the compiler will emit an error explaining which methods are incompatible and why. Common causes include methods with generic type parameters or methods that return `Self` by value.
+</Note>
+
+### Auto Traits and `dyn`
+
+Auto traits (`Send`, `Sync`, `Unpin`, `UnwindSafe`, `RefUnwindSafe`) may be added as additional bounds on any trait object, even though normally only one non-auto trait is allowed:
+
+```rust
+use std::fmt::Debug;
+
+// dyn Debug + Send + Sync is a valid trait object type
+fn process(value: Box<dyn Debug + Send + Sync>) {
+    println!("{:?}", value);
+}
+```
+
+Two trait object types are aliases if their base traits alias each other and their sets of auto traits and lifetime bounds are the same. For example, `dyn Trait + Send + UnwindSafe` is the same type as `dyn Trait + UnwindSafe + Send`.
+
+### Trait Object Lifetime Bounds
+
+Since a trait object can contain references, the lifetimes of those references must be expressed as part of the trait object. This lifetime is written as `Trait + 'a`:
+
+```rust
+// The trait object must outlive 'a
+fn longest_with_announcement<'a>(s: &'a str) -> Box<dyn std::fmt::Display + 'a> {
+    Box::new(s)
+}
+```
+
+There are default lifetime rules that allow this to usually be inferred:
+
+- If the trait has no lifetime bounds, the lifetime is inferred in expressions and is `'static` outside of expressions.
+- For `Box<dyn Foo>`, the default is `'static`.
+- For `&'a dyn Foo`, the default is `'a`.
+
+```rust
+trait Foo {}
+
+// These two are the same because Box<T> has no lifetime bound on T
+type T1 = Box<dyn Foo>;
+type T2 = Box<dyn Foo + 'static>;
+```
+
+<Note>
+Before the 2021 edition, the `dyn` keyword could be omitted when writing trait object types. In the 2021 edition and beyond, `dyn` is required.
+</Note>
+
+---
+
+## `impl Trait`
+
+`impl Trait` provides a way to specify an unnamed but concrete type that implements a specific trait. It can appear in two positions: argument position (as an anonymous type parameter) and return position (as an abstract return type).
+
+```rust
+trait Trait {}
+# impl Trait for () {}
+
+// argument position: anonymous type parameter
+fn foo(arg: impl Trait) {
+}
+
+// return position: abstract return type
+fn bar() -> impl Trait {
+}
+```
+
+### `impl Trait` in Argument Position
+
+`impl Trait` in argument position is syntactic sugar for a generic type parameter. These two forms are nearly equivalent:
+
+```rust
+trait Trait {}
+
+// Generic type parameter
+fn with_generic_type<T: Trait>(arg: T) {}
+
+// impl Trait in argument position
+fn with_impl_trait(arg: impl Trait) {}
+```
+
+The difference is that with `<T: Trait>`, the caller can explicitly specify `T` using turbofish syntax (`foo::<ConcreteType>(val)`), whereas with `impl Trait` the type is always inferred and cannot be named by the caller.
+
+### `impl Trait` in Return Position (RPIT)
+
+`impl Trait` in return position allows a function to return an abstract type without boxing it. The function chooses the concrete return type; callers can only use the methods declared by the specified trait.
+
+```rust
+// Without impl Trait: must box the closure
+fn returns_closure_boxed() -> Box<dyn Fn(i32) -> i32> {
+    Box::new(|x| x + 1)
+}
+
+// With impl Trait: no heap allocation, no dynamic dispatch
+fn returns_closure() -> impl Fn(i32) -> i32 {
+    |x| x + 1
+}
+```
+
+Every possible return value from the function must resolve to the **same concrete type**:
+
+```rust,compile_fail
+fn ambiguous(flag: bool) -> impl std::fmt::Display {
+    if flag {
+        1_i32     // ERROR: concrete types i32 and &str differ
+    } else {
+        "hello"
+    }
+}
+```
+
+`impl Trait` in return position is especially useful with iterators, where the concrete type of a chain of iterator adapters is very complex:
+
+```rust
+fn evens_up_to(n: u32) -> impl Iterator<Item = u32> {
+    (0..n).filter(|x| x % 2 == 0)
+}
+```
+
+### Return-Position `impl Trait` in Traits (RPITIT)
+
+Functions in traits may also use `impl Trait` in return position, which desugars to an anonymous associated type:
+
+```rust
+trait MyTrait {
+    fn make_value(&self) -> impl std::fmt::Display;
+}
+```
+
+### Precise Capturing with `use<..>`
+
+The set of generic parameters captured by a return-position `impl Trait` type can be explicitly controlled with a `use<..>` bound:
+
+```rust
+fn capture<'a, 'b, T>(x: &'a (), y: T) -> impl Sized + use<'a, T> {
+    // Only captures 'a and T; does not capture 'b
+    (x, y)
+}
+```
+
+### Limitations of `impl Trait`
+
+`impl Trait` can only appear as a parameter or return type of a non-`extern` function. It cannot appear as:
+
+- The type of a `let` binding
+- A field type in a struct or enum
+- Inside a type alias
+
+---
+
+## `dyn Trait` vs `impl Trait`
+
+| Feature | `dyn Trait` | `impl Trait` |
+|---------|-------------|--------------|
+| Dispatch | Runtime (virtual dispatch via vtable) | Compile-time (monomorphization) |
+| Allocation | Usually heap-allocated (`Box<dyn Trait>`) | No allocation required |
+| Multiple concrete types | Yes — can hold any conforming type | No — single concrete type per call site |
+| Return type choice | Caller receives the erased type | Function chooses the concrete type |
+| Object safety required | Yes | No |
+| `Sized` | No — trait objects are DSTs | Yes — the concrete type is `Sized` |
+
+Use `dyn Trait` when you need a collection of different types, or when the concrete type is not known at compile time (e.g., loaded from a plugin). Use `impl Trait` when the type is fixed per call site but you want to hide it from the API.

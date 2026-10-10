@@ -1,0 +1,303 @@
+---
+title: "Paths and Name Resolution in Rust"
+sidebarTitle: "Paths & Resolution"
+description: "Guide to Rust paths (simple, qualified, generic), path qualifiers (self, super, crate, $crate), and how the compiler resolves names at compile time."
+---
+
+A _path_ is a sequence of one or more path segments separated by `::` tokens, used to refer to items, values, types, macros, and attributes. Name resolution is the compile-time process that ties paths and identifiers to the declarations of the entities they name.
+
+## Types of Paths
+
+### Simple Paths
+
+Simple paths are used in visibility markers, attributes, macros, and `use` items. They consist of identifier segments (plus `super`, `self`, `crate`, or `$crate`) separated by `::`:
+
+```rust
+use std::io::{self, Write};
+
+mod m {
+    #[clippy::cyclomatic_complexity = "0"]
+    pub(in super) fn f1() {}
+}
+```
+
+### Paths in Expressions
+
+Expression paths allow generic arguments to be specified using `::` before the `<`. This avoids ambiguity with the less-than operator and is colloquially called **turbofish** syntax:
+
+```rust
+(0..10).collect::<Vec<_>>();
+Vec::<u8>::with_capacity(1024);
+```
+
+The order of generic arguments is: lifetime arguments, then type arguments, then const arguments, then equality constraints.
+
+Const arguments must be surrounded by braces unless they are a literal, an inferred const (`_`), or a single-segment path:
+
+```rust
+mod m { pub const C: usize = 1; }
+fn f<const N: usize>() -> [u8; N] { [0; N] }
+
+let _ = f::<1>();           // Literal — no braces needed.
+let _: [_; 1] = f::<_>();  // Inferred const — no braces needed.
+let _ = f::<{ m::C }>();   // Multi-segment path — braces required.
+```
+
+### Paths in Types
+
+Type paths appear in type definitions, trait bounds, and qualified paths. The `::` before generic arguments is optional in type positions (no ambiguity with `<`):
+
+```rust
+# mod ops {
+#     pub struct Range<T> { f1: T }
+#     pub trait Index<T> {}
+# }
+# struct S;
+impl ops::Index<ops::Range<usize>> for S { /* ... */ }
+
+type G = std::boxed::Box<dyn std::ops::FnOnce(isize) -> isize>;
+```
+
+### Qualified Paths
+
+Qualified paths (also called _fully qualified paths_) allow explicit disambiguation when a type implements multiple traits with the same method:
+
+```
+QualifiedPathInExpression -> QualifiedPathType (`::` PathExprSegment)+
+QualifiedPathType -> `<` Type (`as` TypePath)? `>`
+```
+
+```rust
+struct S;
+impl S {
+    fn f() { println!("S"); }
+}
+trait T1 { fn f() { println!("T1 f"); } }
+impl T1 for S {}
+trait T2 { fn f() { println!("T2 f"); } }
+impl T2 for S {}
+
+S::f();          // Calls the inherent impl.
+<S as T1>::f();  // Calls T1's function.
+<S as T2>::f();  // Calls T2's function.
+```
+
+## Path Qualifiers
+
+Paths can begin with various qualifiers that change how the first segment is resolved.
+
+### `::` (Global Path)
+
+Paths starting with `::` are _global paths_. In the 2018 edition and later, they resolve from the extern prelude (i.e., the name must be a crate name):
+
+```rust
+pub fn foo() {
+    // Resolves `std` from the extern prelude in the 2018 edition.
+    let now = ::std::time::Instant::now();
+    println!("{:?}", now);
+}
+```
+
+### `self`
+
+`self` resolves the path relative to the current module. It may only appear as the first segment (without a preceding `::`) or as the last segment:
+
+```rust
+fn foo() {}
+fn bar() {
+    self::foo(); // Refers to foo in the current module.
+}
+```
+
+In a method body, a single `self` segment resolves to the method's self parameter.
+
+### `Self`
+
+`Self` (capital S) refers to the current type being implemented or defined:
+
+- In a trait definition — the type implementing the trait.
+- In an implementation — the type being implemented.
+- In a struct/enum/union definition — the type being defined.
+
+```rust
+trait T {
+    type Item;
+    const C: i32;
+    fn new() -> Self;
+    fn f(&self) -> Self::Item;
+}
+struct S;
+impl T for S {
+    type Item = i32;
+    const C: i32 = 9;
+    fn new() -> Self { S }           // Self is S
+    fn f(&self) -> Self::Item {      // Self::Item is i32
+        Self::C                      // Self::C is 9
+    }
+}
+```
+
+`Self` may only appear as the first segment and cannot include generic arguments.
+
+### `super`
+
+`super` resolves to the parent module. It may be repeated to climb multiple levels:
+
+```rust
+mod a {
+    pub fn foo() {}
+    mod b {
+        mod c {
+            fn foo() {
+                super::super::foo();       // Calls a::foo
+                self::super::super::foo(); // Also calls a::foo
+            }
+        }
+    }
+}
+```
+
+`super` may only appear in leading segments, possibly after an initial `self`.
+
+### `crate`
+
+`crate` resolves relative to the current crate root. It may only be the first segment:
+
+```rust
+fn foo() {}
+mod a {
+    fn bar() {
+        crate::foo(); // Resolves to the crate-root foo
+    }
+}
+```
+
+### `$crate`
+
+`$crate` is only available inside macro transcribers. It expands to a path that accesses items from the top level of the crate _where the macro is defined_, regardless of where it is invoked:
+
+```rust
+pub fn increment(x: u32) -> u32 {
+    x + 1
+}
+
+#[macro_export]
+macro_rules! inc {
+    ($x:expr) => ( $crate::increment($x) )
+}
+```
+
+This ensures `increment` resolves in the defining crate, not the calling crate.
+
+## Canonical Paths
+
+Every item defined in a module or implementation has a _canonical path_ corresponding to where it is defined within its crate. Other paths to the item are aliases.
+
+```rust
+mod a {                        // crate::a
+    pub struct Struct;         // crate::a::Struct
+
+    pub trait Trait {          // crate::a::Trait
+        fn f(&self);           // crate::a::Trait::f
+    }
+
+    impl Trait for Struct {
+        fn f(&self) {}         // <crate::a::Struct as crate::a::Trait>::f
+    }
+
+    impl Struct {
+        fn g(&self) {}         // <crate::a::Struct>::g
+    }
+}
+```
+
+Items defined in block expressions, or in modules without a canonical path, do not have canonical paths.
+
+## Name Resolution
+
+Name resolution is the compile-time process of tying paths to their declarations. It proceeds in three stages:
+
+### Stage 1: Expansion-Time Resolution
+
+This stage resolves all `use` declarations and macro invocations, fully generating the crate's AST. After expansion, every macro invocation must resolve to a valid definition.
+
+`use` declarations are fully resolved during this stage. Type-relative paths (e.g., `use m::A::V` where `A` is a type alias) cannot be resolved at this stage and produce an error:
+
+```rust,compile_fail
+mod m {
+    pub enum E { V }
+    pub type A = E;
+    impl E { pub const C: () = (); }
+}
+use m::A::V; // ERROR: type-relative path cannot be resolved at expansion time
+use m::E::C; // ERROR: type-relative path cannot be resolved at expansion time
+```
+
+Resolution must be stable: after full expansion, names must resolve to the same declaration regardless of the order macros were expanded.
+
+### Stage 2: Primary Resolution
+
+Resolves all remaining names that do not depend on type information.
+
+### Stage 3: Type-Relative Resolution
+
+Resolves the remaining names once type information is available (e.g., `m::A::V` where `A` is a type alias for an enum).
+
+### Scoping and Shadowing
+
+Names introduced via `use` declarations in an outer scope are shadowed by candidates in the same namespace in an inner scope.
+
+```rust,no_run
+pub mod m1 { pub mod ambig { pub const C: u8 = 1; } }
+pub mod m2 { pub mod ambig { pub const C: u8 = 2; } }
+
+use m1::ambig;
+const _: () = {
+    use m2::ambig; // Shadows the outer `ambig` in this block.
+    use ambig::C;
+    assert!(C == 2); // Uses the inner `ambig`.
+};
+```
+
+### Ambiguity Errors
+
+Certain situations produce ambiguity errors during expansion-time resolution:
+
+**Glob vs. Glob** — Two glob imports that bring in the same name from different items are ambiguous at the point of use (not at the point of import):
+
+```rust,compile_fail
+mod m1 { pub struct Ambig; }
+mod m2 { pub struct Ambig; }
+use m1::*;
+use m2::*;
+
+const _: () = {
+    let x = Ambig; // ERROR: `Ambig` is ambiguous
+};
+```
+
+**Glob vs. Outer Scope** — A glob import cannot shadow a candidate from an outer scope:
+
+```rust,compile_fail
+pub mod ambig { pub struct Name; }
+
+pub mod glob { pub mod ambig { pub struct Name; } }
+
+const _: () = {
+    use glob::*;
+    use ambig::Name; // ERROR: `ambig` is ambiguous (glob vs outer candidate)
+};
+```
+
+**Macro Sub-Namespace** — The macro namespace is split into bang-style and attribute sub-namespaces. The reserved names `cfg` and `cfg_attr` cannot be shadowed in the attribute sub-namespace.
+
+### Macro Resolution Order
+
+For macros, the compiler visits available scopes in this order:
+
+1. Derive helpers
+2. Textual scope macros
+3. Path-based scope macros
+4. `macro_use` prelude
+5. Standard library prelude
+6. Built-in attributes

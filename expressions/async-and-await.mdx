@@ -1,0 +1,215 @@
+---
+title: "Async and Await Expressions in Rust"
+sidebarTitle: "Async & Await"
+description: "Learn Rust async blocks returning impl Future, async fn as syntax sugar, the .await operator, pinning, the Future trait, and async closures."
+---
+
+Rust's async/await system enables writing asynchronous code that looks and reads like synchronous code. The `async` keyword marks blocks and functions as producing futures — values representing deferred computations — and the `.await` operator suspends execution of the current async context until a future is ready to produce a value.
+
+<Note>
+  Async/await expressions require an async runtime (such as Tokio, async-std, or smol) to actually execute the futures they produce. The Rust standard library provides the `Future` trait and related infrastructure, but does not include a runtime.
+</Note>
+
+## `async` Blocks
+
+An *async block* is a variant of a block expression that evaluates to a future — a type implementing `std::future::Future`. Executing an async block is similar to executing a closure expression: its immediate effect is to produce and return an anonymous type rather than executing the block's body immediately.
+
+```rust
+async fn example() -> i32 {
+    let fut = async {
+        42
+    };
+    fut.await
+}
+```
+
+The final expression of the async block, if present, determines the result value of the future. When the future is eventually polled to completion, it resolves to that value.
+
+<Note>
+  Async blocks are only available beginning with Rust 2018.
+</Note>
+
+### Capture Modes
+
+Async blocks capture variables from their environment using the same capture modes as closures:
+
+- `async { .. }` — the capture mode for each variable is inferred from the content of the block (by shared reference, mutable reference, or by value as needed).
+- `async move { .. }` — moves all referenced variables into the resulting future.
+
+```rust
+async fn capture_by_ref(data: &[i32]) -> i32 {
+    let fut = async {
+        data.iter().sum() // captures `data` by shared reference
+    };
+    fut.await
+}
+
+async fn capture_by_move(data: Vec<i32>) -> i32 {
+    let fut = async move {
+        data.iter().sum() // moves `data` into the future
+    };
+    fut.await
+}
+```
+
+### Async Context
+
+Because async blocks construct a future, they define an **async context** in which `await` expressions are legal. The `?` operator and `return` expressions inside an async block affect the *output of the future*, not the enclosing function:
+
+```rust,compile_fail
+loop {
+    async move {
+        break; // error[E0267]: `break` inside of an `async` block
+    }
+}
+```
+
+---
+
+## `async fn` as Syntax Sugar
+
+An `async fn` is syntactic sugar for a regular function that returns `impl Future`. The two forms are equivalent in behavior:
+
+```rust
+// Explicit form:
+fn returns_future() -> impl std::future::Future<Output = i32> {
+    async {
+        42
+    }
+}
+
+// async fn sugar:
+async fn also_returns_future() -> i32 {
+    42
+}
+```
+
+The body of an `async fn` is itself treated as an async block, so `await` expressions and `?` operators within it affect the function's future output.
+
+---
+
+## The `.await` Operator
+
+An `await` expression suspends a computation until a given future is ready to produce a value.
+
+```
+Expression . await
+```
+
+The expression before `.await` must have a type that implements `std::future::IntoFuture`. Await expressions are legal **only within an async context** — an `async fn`, an `async` closure, or an `async` block.
+
+```rust
+async fn fetch_value() -> i32 {
+    42
+}
+
+async fn use_value() {
+    let value = fetch_value().await;
+    println!("{}", value);
+}
+```
+
+### How `.await` Works
+
+An await expression has the following effect:
+
+1. Create a future by calling `IntoFuture::into_future` on the future operand.
+2. Evaluate the future to a temporary `tmp`.
+3. Pin `tmp` using `Pin::new_unchecked`.
+4. Poll the pinned future by calling `Future::poll` with the current task context.
+5. If `poll` returns `Poll::Pending`, the surrounding async context suspends, returning `Poll::Pending` to its caller.
+6. When re-polled, execution resumes from step 3.
+7. If `poll` returns `Poll::Ready(value)`, the await expression evaluates to `value`.
+
+The approximate desugaring is:
+
+```rust,ignore
+match operand.into_future() {
+    mut pinned => loop {
+        let mut pin = unsafe { Pin::new_unchecked(&mut pinned) };
+        match Pin::future::poll(Pin::borrow(&mut pin), &mut current_context) {
+            Poll::Ready(r) => break r,
+            Poll::Pending => yield Poll::Pending,
+        }
+    }
+}
+```
+
+### Task Context
+
+The task context (`std::task::Context`) is supplied to the async context when it is polled. It allows the future to register a waker that will notify the runtime when the future is ready to make progress. Because `await` is only valid in an async context, there is always a task context available.
+
+### Pinning Requirements
+
+Futures must be **pinned** before they can be polled. This is because futures may contain self-referential data — references into their own stack frames — and must not be moved after polling begins. The `.await` operator handles pinning automatically; you only need to worry about pinning when implementing `Future` manually or using `Pin` directly.
+
+```rust
+use std::pin::pin;
+
+async fn needs_pin() {
+    let fut = async { 42 };
+    let pinned = pin!(fut);
+    // pinned can now be polled
+}
+```
+
+---
+
+## The `Future` Trait
+
+The connection between `async` and `await` is the `std::future::Future` trait:
+
+```rust,ignore
+pub trait Future {
+    type Output;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output>;
+}
+```
+
+Async blocks and async functions produce types that implement this trait. The runtime repeatedly calls `poll` until the future returns `Poll::Ready(value)`.
+
+---
+
+## Async Closures
+
+Closures marked with `async` are asynchronous. Calling the async closure does not perform any work but returns a value implementing `Future`.
+
+```rust
+async fn takes_async_callback(f: impl AsyncFn(u64)) {
+    f(0).await;
+    f(1).await;
+}
+
+async fn example() {
+    takes_async_callback(async |i| {
+        core::future::ready(i).await;
+        println!("done with {i}.");
+    }).await;
+}
+```
+
+Async closures implement the `AsyncFn`, `AsyncFnMut`, and/or `AsyncFnOnce` traits (analogous to `Fn`, `FnMut`, `FnOnce`) depending on how they capture their environment.
+
+<Note>
+  Async closures are only available beginning with Rust 2018.
+</Note>
+
+---
+
+## Chaining Awaits
+
+Because `.await` is a postfix operator, multiple awaits chain naturally:
+
+```rust
+async fn step_one() -> String { String::from("hello") }
+async fn step_two(s: String) -> String { format!("{} world", s) }
+
+async fn pipeline() -> String {
+    let s = step_one().await;
+    step_two(s).await
+}
+```
+
+<Tip>
+  Avoid holding locks or other non-`Send` types across await points, as this prevents the future from being sent across thread boundaries and can cause deadlocks in multi-threaded runtimes.
+</Tip>

@@ -1,0 +1,198 @@
+---
+title: "Constants and Static Items in Rust"
+sidebarTitle: "Constants & Statics"
+description: "Rust's const and static items: inlined constant values, static memory allocations, static mut safety, and guidance on when to use each."
+---
+
+Rust provides two ways to declare named, fixed values at the module or block level: `const` items and `static` items. While both are evaluated at compile time and can live for the entire duration of a program, they differ in fundamental ways — a constant is inlined wherever it is used and has no memory address, while a static item is a single allocation in memory with a stable address. Choosing between them depends on whether you need the identity (address) of the value, not just its contents.
+
+## Constant items
+
+A _constant item_ is an optionally named _constant value_ which is not associated with a specific memory location in the program. Constants are essentially inlined wherever they are used, meaning they are copied directly into the relevant context.
+
+```rust
+const BIT1: u32 = 1 << 0;
+const BIT2: u32 = 1 << 1;
+
+const BITS: [u32; 2] = [BIT1, BIT2];
+const STRING: &'static str = "bitstring";
+
+struct BitsNStrings<'a> {
+    mybits: [u32; 2],
+    mystring: &'a str,
+}
+
+const BITS_N_STRINGS: BitsNStrings<'static> = BitsNStrings {
+    mybits: BITS,
+    mystring: STRING,
+};
+```
+
+This includes use of constants from external crates and non-`Copy` types. References to the same constant are not necessarily guaranteed to refer to the same memory address.
+
+### Type annotations are required
+
+Constants must be explicitly typed. The type must have a `'static` lifetime: any references in the initializer must have `'static` lifetimes. References in the type of a constant default to `'static` lifetime:
+
+```rust
+const MAX_POINTS: u32 = 100_000;
+const GREETING: &str = "Hello, world!"; // &str defaults to &'static str
+```
+
+### Constant evaluation
+
+Free constants are always evaluated at compile-time to surface panics, even within unused functions:
+
+```rust,compile_fail
+// Compile-time panic
+const PANIC: () = std::unimplemented!();
+
+fn unused_generic_function<T>() {
+    // A failing compile-time assertion
+    const _: () = assert!(usize::BITS == 0);
+}
+```
+
+### Constants with destructors
+
+Constants can contain destructors. Destructors are run when the value goes out of scope:
+
+```rust
+struct TypeWithDestructor(i32);
+
+impl Drop for TypeWithDestructor {
+    fn drop(&mut self) {
+        println!("Dropped. Held {}.", self.0);
+    }
+}
+
+const ZERO_WITH_DESTRUCTOR: TypeWithDestructor = TypeWithDestructor(0);
+
+fn create_and_drop_zero_with_destructor() {
+    let x = ZERO_WITH_DESTRUCTOR;
+    // x gets dropped at end of function, calling drop.
+    // prints "Dropped. Held 0.".
+}
+```
+
+### Unnamed constants
+
+Unlike associated constants, a free constant may be unnamed by using an underscore instead of the name. This is particularly useful in macros, since macros may safely emit the same unnamed constant in the same scope more than once:
+
+```rust
+const _: () = { struct _SameNameTwice; };
+
+// OK: underscore constants don't conflict
+const _: () = { struct _SameNameTwice; };
+```
+
+```rust
+macro_rules! m {
+    ($item: item) => { $item $item }
+}
+
+m!(const _: () = (););
+// Expands to:
+// const _: () = ();
+// const _: () = ();
+```
+
+## Static items
+
+A _static item_ is similar to a constant, except that it represents a real allocation in the program that is initialized with the initializer expression. All references and raw pointers to the static refer to the same allocation.
+
+Static items have the `'static` lifetime, which outlives all other lifetimes in a Rust program. Static items do not call `drop` at the end of the program.
+
+```rust
+static HELLO_WORLD: &str = "Hello, world!";
+
+fn main() {
+    println!("{}", HELLO_WORLD);
+}
+```
+
+### Thread safety
+
+The type of a static must implement the `Sync` trait to allow thread-safe access:
+
+```rust
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn increment() {
+    COUNTER.fetch_add(1, Ordering::Relaxed);
+}
+```
+
+### Statics in generic scopes
+
+A static item defined in a generic scope (for example in a blanket or default implementation) results in exactly one static item being defined, as if the static definition was pulled out of the current scope into the module. There will _not_ be one item per monomorphization:
+
+```rust
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+trait Tr {
+    fn default_impl() {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        println!("default_impl: counter was {}", COUNTER.fetch_add(1, Ordering::Relaxed));
+    }
+}
+```
+
+If `default_impl` is called for two different types implementing `Tr`, the `COUNTER` static is shared between both calls.
+
+## Mutable statics
+
+If a static item is declared with the `mut` keyword, it is allowed to be modified by the program. Because mutable statics are a large source of race conditions and other bugs, an `unsafe` block is required when either reading or writing a mutable static variable:
+
+```rust
+# fn atomic_add(_: *mut u32, _: u32) -> u32 { 2 }
+
+static mut LEVELS: u32 = 0;
+
+// This violates the idea of no shared state, and does not protect
+// against races, so this function is `unsafe`
+unsafe fn bump_levels_unsafe() -> u32 {
+    unsafe {
+        let ret = LEVELS;
+        LEVELS += 1;
+        return ret;
+    }
+}
+
+// A safer alternative using atomic operations
+fn bump_levels_safe() -> u32 {
+    unsafe {
+        return atomic_add(&raw mut LEVELS, 1);
+    }
+}
+```
+
+<Warning>
+Mutable statics are a significant source of data races. Only use `static mut` when you can guarantee exclusive access or when coordinating with atomic operations. Consider using `Mutex`, `RwLock`, or atomic types instead for shared mutable state.
+</Warning>
+
+Mutable statics have the same restrictions as normal statics, except that the type does not have to implement the `Sync` trait.
+
+## `const` vs `static` — which to use?
+
+Constants should, in general, be preferred over statics unless one of the following are true:
+
+- **Large amounts of data** are being stored (constants are inlined everywhere they are used; statics exist at a single address)
+- **The single-address property** of statics is required (e.g., you need to compare pointers, or pass the address to C code)
+- **Interior mutability** is required (e.g., `static MY_MUTEX: Mutex<i32> = Mutex::new(0)`)
+
+| Feature | `const` | `static` |
+|---|---|---|
+| Memory address | No fixed address (inlined) | Single fixed address |
+| `'static` lifetime | Yes (references in value must be `'static`) | Yes (the static itself is `'static`) |
+| Type must be `Sync` | No | Yes (unless `mut`) |
+| Mutable | No | Yes, with `mut` + `unsafe` |
+| Evaluated at | Compile time | Compile time (initializer) |
+| `Drop` called | Yes (when inline copy goes out of scope) | No |
+| Can omit value | Only in trait definitions | Only in `extern` blocks |
+
+<Tip>
+Use `const` for values that are logically constants (mathematical constants, configuration limits, magic numbers). Use `static` when you need a single instance with a stable memory address, for example a global logger, a mutex-protected resource, or an FFI-facing symbol.
+</Tip>
