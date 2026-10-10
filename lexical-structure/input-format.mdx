@@ -31,7 +31,7 @@ If the very first character of the decoded UTF-8 stream is `U+FEFF` (the Unicode
 
 ## CRLF Normalization
 
-Every pair of characters `U+000D` (CR) immediately followed by `U+000A` (LF) is replaced by a single `U+000A` (LF). This normalization happens in a single pass — it is **not** applied repeatedly. As a result, after normalization a `CR LF` sequence produced by double-line-endings such as `CR CR LF LF` may still contain a bare `CR` followed by `LF`.
+Every pair of characters `U+000D` (CR) immediately followed by `U+000A` (LF) is replaced by a single `U+000A` (LF). This normalization happens in a single pass — it is **not** applied repeatedly. As a result, after normalization there can still exist `U+000D` (CR) immediately followed by `U+000A` (LF) in the input (for example, if the raw input contained `CR CR LF LF`).
 
 Other occurrences of `U+000D` (CR) that are not immediately followed by `U+000A` (LF) are left in place and are treated as [whitespace](/lexical-structure/comments-and-whitespace).
 
@@ -41,7 +41,7 @@ If a shebang line is present at the start of the file, it is removed from the in
 
 A typical shebang line for a Rust script looks like:
 
-```rust
+```rust,ignore
 #!/usr/bin/env rustx
 
 fn main() {
@@ -58,5 +58,5 @@ fn main() {
 After the four transformations above (UTF-8 decoding, BOM removal, CRLF normalization, and shebang removal), the resulting character sequence is converted into a stream of tokens as described in the rest of the lexical structure chapters.
 
 <Note>
-  The standard library [`include!`](https://doc.rust-lang.org/std/macro.include.html) macro applies byte order mark removal, CRLF normalization, and shebang removal (when invoked in an item context) to the file it reads. The [`include_str!`](https://doc.rust-lang.org/std/macro.include_str.html) and [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) macros do **not** apply these transformations — they expose the raw file contents.
+  The standard library [`include!`](https://doc.rust-lang.org/std/macro.include.html) macro applies byte order mark removal, CRLF normalization, and shebang removal (when invoked in an item context) to the file it reads. The [`include_str!`](https://doc.rust-lang.org/std/macro.include_str.html) and [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) macros do **not** apply these transformations.
 </Note>

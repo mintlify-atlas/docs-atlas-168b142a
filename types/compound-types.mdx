@@ -226,7 +226,7 @@ let val = unsafe { u.int_val };
 Reading from a union field requires `unsafe` because the compiler cannot verify that the data is a valid representation for the accessed type. Accessing the wrong field results in undefined behavior.
 </Warning>
 
-Union field types are restricted to types that do not need dropping (i.e., types that implement `Copy`, or types that are the target of raw pointers). The memory layout of a union is undefined by default but can be fixed with `#[repr(C)]` or other `repr` attributes.
+Union field types are restricted to `Copy` types, references (`&T` and `&mut T`), `ManuallyDrop<T>`, and tuples or arrays of those types. This restriction ensures union fields never need to be dropped. The memory layout of a union is undefined by default but can be fixed with `#[repr(C)]` or other `repr` attributes.
 
 Recursive types (structs, enums, or unions that refer to themselves) are allowed, but the size must be finite — recursive fields must be behind pointer types:
 

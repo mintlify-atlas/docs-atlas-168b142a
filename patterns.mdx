@@ -501,7 +501,7 @@ for i in -2..5 {
 }
 ```
 
-Or-patterns are valid anywhere a [Pattern] is accepted, except in `let` bindings and function/closure parameters (which require [PatternNoTopAlt]).
+Or-patterns are valid anywhere a `Pattern` is accepted, except in `let` bindings and function/closure parameters (which require a `PatternNoTopAlt`).
 
 <Warning>
 Or-patterns always have the lowest precedence. `x @ A(..) | B(..)` is an error because `x` is not bound in all sub-patterns. `&A(x) | B(x)` is an error due to a type mismatch between sub-patterns.

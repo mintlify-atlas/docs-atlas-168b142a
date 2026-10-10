@@ -59,7 +59,7 @@ Which calling traits the closure type implements depends on how variables are ca
 
 - **`FnOnce`** — Can be called at least once. Implemented by all closures. A closure that moves out of a captured variable implements only `FnOnce`.
 - **`FnMut`** — Can be called multiple times, mutating captured variables. Implemented by closures that don't move out of captured variables.
-- **`Fn`** — Can be called multiple times without mutation. Implemented by closures that only capture by shared reference or are `Copy`.
+- **`Fn`** — Can be called multiple times without mutation. Implemented by closures that do not mutate or move out of any captured variables.
 
 ```rust
 // FnOnce: takes ownership of s

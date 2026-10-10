@@ -294,5 +294,5 @@ let x = loop {};  // infinite loop has type `!`
 ```
 
 <Note>
-A type being uninhabited (like an empty enum) is not sufficient for it to diverge. The never type `!` is special — only expressions of type `!` are truly diverging.
+Though `!` is considered an uninhabited type, a type being uninhabited is not sufficient for it to diverge.
 </Note>

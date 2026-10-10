@@ -1,5 +1,5 @@
 ---
-title: "Pointer and Function Types in Rust"
+title: "Rust References, Raw Pointers, and Function Pointer Types"
 sidebarTitle: "Pointer & Function Types"
 description: "Reference for Rust pointer types (shared/mutable references, raw pointers), function item types, function pointer types, and closure types with Fn traits."
 ---
@@ -14,7 +14,7 @@ All pointers in Rust are explicit, first-class values. They can be moved or copi
 
 A shared reference points to memory owned by some other value. Shared references are written as `&T` or `&'a T` when an explicit lifetime is needed. Any number of shared references to a value may exist simultaneously.
 
-When a shared reference is created, it prevents direct mutation of the referenced value. The only exception is types with [interior mutability](/type-system/special-types-and-traits#unsafecellt).
+When a shared reference is created, it prevents direct mutation of the referenced value. The only exception is types with [interior mutability](/type-system/special-types-and-traits).
 
 Copying a shared reference is a shallow operation that only copies the pointer itself — shared references implement `Copy`. Releasing (dropping) a reference has no effect on the value it points to.
 
@@ -150,7 +150,7 @@ let rust_fn: fn(i32) -> i32;
 Function item types and non-capturing, non-async closures can be coerced to function pointers with the matching signature:
 
 ```rust
-// Function item coerced to fn pointer
+// Non-capturing closure coerced to fn pointer
 let foo_ptr_1: fn() = || {};
 
 // Different function items coerced to the same fn pointer type in a match

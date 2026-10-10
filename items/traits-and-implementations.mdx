@@ -1,5 +1,5 @@
 ---
-title: "Traits and Implementations in Rust"
+title: "Traits and Implementations: Rust's Polymorphism System"
 sidebarTitle: "Traits & Impls"
 description: "Defining and implementing Rust traits: associated items, default methods, unsafe traits, supertraits, inherent impls, and the orphan rule."
 ---
@@ -129,6 +129,10 @@ A dyn-compatible trait can be the base trait of a trait object (`dyn Trait`). A 
 - It must not have any associated constants
 - It must not have any associated types with generics
 - All associated functions must either be dispatchable from a trait object or be explicitly non-dispatchable (with a `where Self: Sized` bound)
+
+<Note>
+The `AsyncFn`, `AsyncFnMut`, and `AsyncFnOnce` traits are not dyn-compatible.
+</Note>
 
 ```rust
 # use std::rc::Rc;

@@ -93,7 +93,7 @@ Rust provides two IEEE 754 floating-point types:
 Both types support the special values `NaN` (not-a-number), positive infinity, and negative infinity. Floating-point arithmetic follows IEEE 754 semantics.
 
 <Warning>
-Float range patterns may not use `NaN` as a bound. Comparing `NaN` to any value (including itself) with `==` always returns `false`.
+Float range patterns may not use `NaN` as a bound.
 </Warning>
 
 ```rust
@@ -137,7 +137,7 @@ let greeting1: &str = "Hello, world!";
 let greeting2: &str = "你好，世界";
 ```
 
-A value of type `str` is represented the same way as `[u8]` — a slice of 8-bit unsigned bytes. Methods working on `str` assume and ensure the data is valid UTF-8; calling a `str` method with a non-UTF-8 buffer can cause undefined behavior.
+A value of type `str` is represented the same way as `[u8]` — a slice of 8-bit unsigned bytes. Methods working on `str` assume and ensure the data is valid UTF-8; calling a `str` method with a non-UTF-8 buffer can cause undefined behavior now or in the future.
 
 ### `str` is a Dynamically Sized Type
 
@@ -197,7 +197,7 @@ let Ok(s) = Anything::from_str("example");
 ```
 
 <Note>
-The standard library type `std::convert::Infallible` is a type alias for `!`. Before `!` was stabilized as a type, `Infallible` served the same purpose.
+The standard library type [`std::convert::Infallible`](https://doc.rust-lang.org/core/convert/enum.Infallible.html) is a type alias for `!`.
 </Note>
 
-Any diverging expression has type `!`, but diverging expressions are not limited to type `!`. For example, `Some(loop {})` has type `Option<!>`. If a type to be inferred is only unified with diverging expressions, it is inferred to be `!`.
+Any expression of type `!` is a diverging expression. However, diverging expressions are not limited to type `!`. For example, `Some(loop {})` has type `Option<!>`. If a type to be inferred is only unified with diverging expressions, it is inferred to be `!`.

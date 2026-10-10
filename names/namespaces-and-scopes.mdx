@@ -1,5 +1,5 @@
 ---
-title: "Namespaces and Scopes in the Rust Name System"
+title: "Rust Namespaces and Scopes: Type, Value, Macro, and More"
 sidebarTitle: "Namespaces & Scopes"
 description: "How Rust organizes names into type, value, macro, lifetime, and label namespaces, and the scoping rules that govern where each name is visible."
 ---
@@ -187,6 +187,8 @@ It is also an error to shadow a generic parameter (except inside nested function
 trait SomeTrait<'a, T, const N: usize> {
     fn example_lifetime<'a>() {} // ERROR: 'a is already in use
     fn example_type<T>() {} // ERROR: T is already in use
+    fn example_const<const N: usize>() {} // ERROR: N is already in use
+    fn example_mixed<const T: usize>() {} // ERROR: T is already in use
 }
 ```
 

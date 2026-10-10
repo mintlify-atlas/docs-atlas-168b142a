@@ -1,7 +1,7 @@
 ---
-title: "Paths and Name Resolution in Rust"
+title: "Rust Paths and Name Resolution: Qualifiers and Stages"
 sidebarTitle: "Paths & Resolution"
-description: "Guide to Rust paths (simple, qualified, generic), path qualifiers (self, super, crate, $crate), and how the compiler resolves names at compile time."
+description: "Guide to Rust path forms (simple, expression, type, qualified), path qualifiers like self, super, crate, and $crate, and how the compiler resolves names."
 ---
 
 A _path_ is a sequence of one or more path segments separated by `::` tokens, used to refer to items, values, types, macros, and attributes. Name resolution is the compile-time process that ties paths and identifiers to the declarations of the entities they name.
@@ -62,7 +62,7 @@ type G = std::boxed::Box<dyn std::ops::FnOnce(isize) -> isize>;
 
 Qualified paths (also called _fully qualified paths_) allow explicit disambiguation when a type implements multiple traits with the same method:
 
-```
+```text
 QualifiedPathInExpression -> QualifiedPathType (`::` PathExprSegment)+
 QualifiedPathType -> `<` Type (`as` TypePath)? `>`
 ```
@@ -279,13 +279,22 @@ const _: () = {
 **Glob vs. Outer Scope** — A glob import cannot shadow a candidate from an outer scope:
 
 ```rust,compile_fail
-pub mod ambig { pub struct Name; }
+mod glob {
+    pub mod ambig {
+        pub struct Name;
+    }
+}
 
-pub mod glob { pub mod ambig { pub struct Name; } }
+// Outer `ambig` candidate.
+pub mod ambig {
+    pub struct Name;
+}
 
 const _: () = {
+    // Cannot resolve `ambig` through this glob
+    // because of the outer `ambig` candidate above.
     use glob::*;
-    use ambig::Name; // ERROR: `ambig` is ambiguous (glob vs outer candidate)
+    use ambig::Name; // ERROR: `ambig` is ambiguous
 };
 ```
 

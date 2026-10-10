@@ -8,6 +8,8 @@ Rust provides a rich set of built-in attributes for controlling compiler diagnos
 
 ## Diagnostic Attributes
 
+Diagnostic attributes adjust compiler warnings, mark items as deprecated, and enforce that certain return values are not silently discarded.
+
 ### Lint Check Attributes
 
 The attributes `allow`, `expect`, `warn`, `deny`, and `forbid` adjust the lint level for the entity they are applied to. They use the MetaListPaths syntax to specify one or more lint names:
@@ -181,6 +183,8 @@ where
 
 ## Code Generation Attributes
 
+Code generation attributes give fine-grained control over inlining decisions, call-site tracking, platform-specific instruction selection, symbol naming, and object file section placement.
+
 ### `#[inline]`
 
 The `#[inline]` attribute suggests to the compiler whether to inline a copy of the function's code at the call site.
@@ -292,6 +296,8 @@ Both are unsafe attributes because incorrect use can cause undefined behavior th
 Specifies which section of the object file a function or static is placed in. This is an unsafe attribute.
 
 ## Conditional Compilation
+
+Conditional compilation attributes and the `cfg!` macro allow including or excluding code based on compile-time configuration predicates such as target platform, enabled features, and build mode.
 
 ### The `cfg` Attribute
 

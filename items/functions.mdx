@@ -30,6 +30,10 @@ Abi -> STRING_LITERAL | RAW_STRING_LITERAL
 
 If the output type is not explicitly stated, it defaults to the unit type `()`. When referred to, a function yields a first-class value of the corresponding zero-sized [function item type].
 
+<Note>
+The `safe` function qualifier in `ItemSafety` is semantically only allowed when used inside an `extern` block.
+</Note>
+
 ## Function parameters
 
 Function parameters are irrefutable [patterns], so any pattern valid in an else-less `let` binding is also valid as a parameter:

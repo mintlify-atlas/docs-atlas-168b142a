@@ -1,12 +1,14 @@
 ---
-title: "Type System and Debugger Attributes in Rust"
-sidebarTitle: "Type System Attrs"
+title: "Type System, Limits, and Debugger Attributes in Rust"
+sidebarTitle: "Type System"
 description: "Reference for Rust's type system attributes (#[non_exhaustive], #[repr]), compile-time limit attributes, and debugger visualization attributes."
 ---
 
 Rust provides several attributes that influence how types are represented in memory, restrict how they can be used from downstream crates, control compile-time resource limits, and embed debugging aids for third-party debuggers like GDB and WinDbg.
 
 ## Type System Attributes
+
+Type system attributes influence how types are represented in memory and restrict how they may be used from downstream crates.
 
 ### `#[non_exhaustive]`
 
@@ -145,6 +147,8 @@ enum CEnum {
 
 ## Limit Attributes
 
+Limit attributes control compile-time resource consumption, preventing unbounded macro expansion or excessively large monomorphized types from stalling the compiler.
+
 ### `#[recursion_limit = "N"]`
 
 The `#[recursion_limit]` attribute sets the maximum depth for potentially infinitely-recursive compile-time operations such as macro expansion and auto-dereferencing. It must be applied at the crate root and uses the MetaNameValueStr syntax.
@@ -197,6 +201,8 @@ f(((((1,), 2), 3), 4));
 </Note>
 
 ## Debugger Attributes
+
+Debugger attributes embed visualizer files and control debuginfo generation to improve the experience when inspecting Rust values in GDB, WinDbg, or Visual Studio.
 
 ### `#[debugger_visualizer]`
 

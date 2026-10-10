@@ -65,7 +65,7 @@ In the matcher, `$name:fragment-specifier` binds a piece of Rust syntax to the m
 | `block` | A block expression (without inner attributes) |
 | `expr` | An expression |
 | `expr_2021` | An expression (excluding `_` and `const {}` at the top level; for pre-2024 compatibility) |
-| `ident` | An identifier or keyword (except `_`) |
+| `ident` | An identifier or keyword, including raw identifiers (except `_` and `$crate`) |
 | `item` | An item |
 | `lifetime` | A lifetime token |
 | `literal` | A literal expression (optionally preceded by `-`) |

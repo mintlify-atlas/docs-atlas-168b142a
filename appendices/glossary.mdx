@@ -1,5 +1,5 @@
 ---
-title: "Rust Reference Glossary of Terms and Concepts"
+title: "Rust Language Glossary: Key Terms and Concepts Defined"
 sidebarTitle: "Glossary"
 description: "Comprehensive glossary of Rust language terms covering types, memory, traits, generics, patterns, and more — with concise definitions."
 ---
@@ -69,6 +69,12 @@ A *bound* is a constraint on a type or trait. Bounds are written with `:` syntax
 
 ---
 
+### Combinator
+
+*Combinators* are higher-order functions that apply only functions and earlier defined combinators to provide a result from their arguments. They can be used to manage control flow in a modular fashion.
+
+---
+
 ### Crate
 
 A *crate* is the unit of compilation and linking in Rust. A crate has a self-contained tree of modules starting from an unnamed root (the crate root). Crates can be executables (`bin`), libraries (`lib`, `rlib`, `dylib`, etc.), or proc-macros. Items may be made visible to other crates by being `pub` in the crate root.
@@ -114,26 +120,39 @@ A *dynamically sized type* (DST) is a type whose size and alignment are not know
 
 ---
 
+### Dyn-Compatible Trait
+
+A trait is *dyn-compatible* (formerly called *object safe*) if it can be used as the target of a `dyn Trait` type. A trait is dyn-compatible if it follows certain rules, including: no generic type parameters, no `Self: Sized` bounds on the trait, and all methods must be dispatchable.
+
+---
+
+### Entity
+
+An *entity* is a language construct that can be referred to in some way within the source program, usually via a path. Entities include types, items, generic parameters, variable bindings, loop labels, lifetimes, fields, attributes, and lints.
+
+---
+
 ### Expression
 
 An *expression* is a syntactic construct that evaluates to a value. Expressions may have side effects. For example, `2 + (3 * 4)` evaluates to `14`. In Rust, blocks, `if`, `match`, and `loop` are also expressions.
 
 ---
 
-### Fat Pointer
-
-A *fat pointer* (also called a *wide pointer*) is a pointer that carries metadata in addition to the memory address. Fat pointers are used for DSTs:
-
-- Slice fat pointer: address + length.
-- Trait object fat pointer: address + pointer to vtable.
-
-Regular pointers to sized types are *thin pointers* (address only).
-
----
-
 ### Free Item
 
 A *free item* is an item that is not a member of any implementation — such as a free function or a free constant defined directly in a module. Contrast with an *associated item*.
+
+---
+
+### Fundamental Traits
+
+A *fundamental trait* is one where adding an implementation of it for an existing type is a breaking change. The `Fn` traits and `Sized` are fundamental.
+
+---
+
+### Fundamental Type Constructors
+
+A *fundamental type constructor* is a type where implementing a blanket implementation over it is a breaking change. `&`, `&mut`, `Box`, and `Pin` are fundamental. Any time a type `T` is considered local, `&T`, `&mut T`, `Box<T>`, and `Pin<T>` are also considered local.
 
 ---
 
@@ -146,6 +165,12 @@ A *glob import* (written `use some::module::*`) imports all public items from a 
 ### Hygienic Macro
 
 A *hygienic macro* is a macro whose generated identifiers do not accidentally capture or be captured by identifiers in the surrounding code. Rust's `macro_rules!` macros are hygienic with respect to local variables but not with respect to items.
+
+---
+
+### Inhabited
+
+A type is *inhabited* if it has constructors and therefore can be instantiated. An inhabited type is not "empty" in the sense that there can be values of the type. Opposite of *uninhabited*.
 
 ---
 
@@ -173,9 +198,21 @@ A *lifetime* (written `'a`) is a named region of code during which a reference i
 
 ---
 
+### Local Trait
+
+A `trait` defined in the current crate. A trait definition is local or not independent of applied type arguments. Given `trait Foo<T, U>`, `Foo` is always local, regardless of the types substituted for `T` and `U`.
+
+---
+
 ### Local Type
 
 A `struct`, `enum`, or `union` defined in the current crate. Locality is not affected by type arguments: `struct Foo` is local regardless of what types are substituted into its generic parameters. Type aliases do not affect locality.
+
+---
+
+### Module
+
+A *module* is a container for zero or more items. Modules are organized in a tree, starting from an unnamed module at the root called the crate root. Paths may be used to refer to items from other modules, which may be restricted by visibility rules.
 
 ---
 
@@ -185,33 +222,33 @@ A `struct`, `enum`, or `union` defined in the current crate. Locality is not aff
 
 ---
 
+### Name
+
+A *name* is an identifier or lifetime or loop label that refers to an entity. A *name binding* is when an entity declaration introduces an identifier or label associated with that entity.
+
+---
+
+### Name Resolution
+
+*Name resolution* is the compile-time process of tying paths, identifiers, and labels to entity declarations.
+
+---
+
+### Namespace
+
+A *namespace* is a logical grouping of declared names based on the kind of entity the name refers to. Namespaces allow the occurrence of a name in one namespace to not conflict with the same name in another namespace.
+
+---
+
 ### Nominal Type
 
 A *nominal type* is a type identified by name (a path). In Rust: enums, structs, unions, and trait objects. Nominal types can be referred to by path directly. Contrast with structural types like tuples and arrays.
 
 ---
 
-### Object Safety (Dyn-Compatibility)
+### Path
 
-A trait is *dyn-compatible* (formerly called *object safe*) if it can be used as the target of a `dyn Trait` type. A trait is dyn-compatible if it follows certain rules, including: no generic type parameters, no `Self: Sized` bounds on the trait, and all methods must be dispatchable (no methods that return `Self` by value without a bound, etc.).
-
----
-
-### Opaque Type
-
-An *opaque type* is a type whose concrete identity is hidden from the caller. In Rust, `impl Trait` in return position produces an opaque type: the caller knows the returned value implements `Trait`, but not what the concrete type is.
-
----
-
-### Orphan Rule
-
-The *orphan rule* is a restriction on where `impl Trait for Type` may be written: at least one of `Trait` or `Type` must be defined in the current crate. This prevents conflicting implementations from different crates.
-
----
-
-### Owned Pointer
-
-An *owned pointer* is a pointer that has exclusive ownership of the data it points to — responsible for deallocating it when dropped. `Box<T>` is Rust's owned heap pointer. Moving an owned pointer transfers ownership.
+A *path* is a sequence of one or more path segments used to refer to an entity in the current scope or other levels of a namespace hierarchy.
 
 ---
 
@@ -233,9 +270,21 @@ A *raw pointer* (`*const T` or `*mut T`) is a pointer that is not subject to Rus
 
 ---
 
+### Scope
+
+A *scope* is the region of source text where a named entity may be referenced with that name.
+
+---
+
 ### Scrutinee
 
 The *scrutinee* is the expression being matched on in a `match` expression, `if let`, `while let`, or other pattern-matching construct. In `match x { A => 1, B => 2 }`, `x` is the scrutinee.
+
+---
+
+### Size
+
+The *size* of a value specifies how much memory must be allocated to store it, and also the offset in bytes between successive elements in an array with that item type. It is a multiple of the alignment, including zero.
 
 ---
 
@@ -257,9 +306,21 @@ A *statement* is the smallest standalone element that commands a computer to per
 
 ---
 
+### String Literal
+
+A *string literal* is a string stored directly in the final binary, and so will be valid for the `'static` duration. Its type is `&'static str`.
+
+---
+
 ### String Slice
 
 A *string slice* (`str`) is the most primitive string type in Rust. String slices are always valid UTF-8. They are always accessed through a reference: `&str` (shared) or `&mut str` (mutable). A string literal has type `&'static str`.
+
+---
+
+### Trait
+
+A *trait* is a language item that describes the functionalities a type must provide. It allows a type to make certain promises about its behavior. Generic functions and generic structs can use traits to constrain, or bound, the types they accept.
 
 ---
 
@@ -286,15 +347,21 @@ A *type alias* (`type Foo = Bar`) introduces a new name for an existing type. Ty
 
 ---
 
-### Uninitialized Memory
+### Uncovered Type
 
-*Uninitialized memory* is memory that has been allocated but not written. Reading from uninitialized memory is undefined behavior for most types. The type `MaybeUninit<T>` provides a safe way to work with potentially-uninitialized values.
+A type which does not appear as an argument to another type. For example, `T` is uncovered, but the `T` in `Vec<T>` is covered. This is only relevant for type arguments.
 
 ---
 
 ### Undefined Behavior (UB)
 
 *Undefined behavior* is compile-time or runtime behavior that is not specified by the Rust language. Programs that exhibit UB may produce arbitrary results: crashes, wrong output, or seemingly correct behavior. Undefined behavior is a contract violation — the compiler is permitted to assume it never occurs and optimize accordingly.
+
+---
+
+### Uninhabited
+
+A type is *uninhabited* if it has no constructors and therefore can never be instantiated. An uninhabited type is "empty" in the sense that there are no values of the type. The canonical example of an uninhabited type is the never type `!`, or an enum with no variants `enum Never { }`. Opposite of *inhabited*.
 
 ---
 

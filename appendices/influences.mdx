@@ -1,5 +1,5 @@
 ---
-title: "Languages That Influenced Rust's Design"
+title: "Programming Languages That Influenced Rust's Design"
 sidebarTitle: "Influences"
 description: "The programming languages that shaped Rust: type systems, memory models, concurrency, macros, and syntactic choices with their origins."
 ---
@@ -163,7 +163,7 @@ Note: Some earlier Rust designs explored *linked thread failure* (where a parent
 
 <CardGroup cols={1}>
 <Card title="Swift" icon="code">
-**Contributions**: Optional bindings (`if let`, `while let`).
+**Contributions**: Optional bindings.
 
 Swift introduced the `if let` pattern for safely unwrapping optional values without panicking. Rust adopted a generalization of this pattern: `if let` and `while let` work with any irrefutable pattern, not just optionals.
 

@@ -28,6 +28,18 @@ unsafe { COUNTER += 1; } // UB if there is concurrent access
 
 Use atomics (`std::sync::atomic::*`) or synchronization primitives (`Mutex`, `RwLock`) to safely share mutable state between threads.
 
+### Out-of-Bounds Place Projections
+
+Performing an offsetting place projection that violates the requirements of [in-bounds pointer arithmetic](https://doc.rust-lang.org/std/primitive.pointer.html#method.offset) is undefined behavior. An offsetting place projection includes field expressions, tuple index expressions, and array/slice index expressions.
+
+```rust
+let arr = [1i32, 2, 3];
+let ptr = arr.as_ptr();
+
+// UB: pointer arithmetic goes past the end of the allocation
+let _out_of_bounds = unsafe { &*ptr.add(10) };
+```
+
 ### Dangling Pointers
 
 A reference or pointer is **dangling** if not all of the bytes it points to are part of the same live allocation. Accessing a dangling pointer is undefined behavior:
@@ -120,6 +132,7 @@ The following are all undefined behavior:
 | `char` in the surrogate range (`0xD800..=0xDFFF`) or above `char::MAX` | Not a valid Unicode scalar value |
 | A value of type `!` | The never type has no valid values |
 | An uninitialized integer, float, or raw pointer | Uninitialized bits |
+| A `str` value with uninitialized bytes | Must be initialized (treated like `[u8]`) |
 | An `enum` with an invalid discriminant | Discriminant must match a defined variant |
 | A `fn` pointer that is null | Function pointers must be non-null |
 | A reference or `Box<T>` that is null, dangling, or unaligned | Must be valid and aligned |

@@ -1,5 +1,5 @@
 ---
-title: "Preludes: Automatically Imported Items in Rust"
+title: "Rust Preludes: Automatically Imported Names and Scopes"
 sidebarTitle: "Preludes"
 description: "What Rust's preludes are, what's in the standard library prelude, the extern prelude, the language prelude, and how no_std changes prelude behavior."
 ---
@@ -8,15 +8,15 @@ A _prelude_ is a collection of names that are automatically brought into scope i
 
 ## The Five Preludes
 
-| Prelude | Contents | Shadowed by |
-|---------|----------|-------------|
-| Language prelude | Built-in types, built-in derives | (always in scope, cannot be shadowed by other preludes) |
-| Standard library prelude | Common types and traits | Language prelude |
-| `macro_use` prelude | Macros from `#[macro_use] extern crate` | Standard library prelude |
-| Tool prelude | Tool attribute module names | `macro_use` prelude |
-| Extern prelude | Crate names (`std`, `core`, etc.) | Tool prelude |
+| Priority | Prelude | Contents |
+|----------|---------|----------|
+| 1 (highest) | Extern prelude | Crate names (`std`, `core`, etc.) |
+| 2 | Tool prelude | Tool attribute module names |
+| 3 | `macro_use` prelude | Macros from `#[macro_use] extern crate` |
+| 4 | Standard library prelude | Common types and traits |
+| 5 (lowest) | Language prelude | Built-in types, built-in derives |
 
-Earlier entries in this list take priority when names conflict.
+Earlier entries in this list may shadow later ones when names conflict. Module declarations in the current module may shadow all prelude names.
 
 <Note>
 Prelude names are not members of the current module. You cannot refer to them as `self::Box` even though `Box` is in scope. They are implicitly queried during name resolution.
@@ -43,7 +43,6 @@ The standard prelude (v1, used by 2015 and 2018 editions) includes the following
 - `String` — owned, heap-allocated UTF-8 string
 - `Vec<T>` — growable array
 - `Box<T>` — heap-allocated value
-- `Rc<T>` — reference-counted smart pointer (not `Send`)
 
 **Traits:**
 - `Clone` — the `clone()` method

@@ -1,5 +1,5 @@
 ---
-title: "Type Layout, Alignment, and Coercions in Rust"
+title: "Rust Type Layout, Alignment, repr, and Type Coercions"
 sidebarTitle: "Layout & Coercions"
 description: "Reference for Rust type layout, alignment, repr attributes (C, transparent, packed, align), DST layout, type coercions, and coercion sites with examples."
 ---
@@ -63,7 +63,6 @@ The default representation makes no guarantees about field ordering or padding b
 
 1. The offset of a field is divisible by that field's alignment.
 2. The alignment of the type is at least the maximum alignment of its fields.
-3. Fields do not overlap.
 
 The compiler may reorder fields to minimize padding.
 

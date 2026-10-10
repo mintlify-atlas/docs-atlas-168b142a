@@ -1,5 +1,5 @@
 ---
-title: "Visibility and Privacy in Rust Modules"
+title: "Rust Visibility and Privacy: pub, pub(crate), and More"
 sidebarTitle: "Visibility"
 description: "How Rust's visibility system works: pub, pub(crate), pub(super), pub(in path), private by default, re-exports with pub use, and struct field visibility."
 ---
@@ -8,7 +8,7 @@ Rust's visibility system controls which items can be accessed from which locatio
 
 ## Visibility Syntax
 
-```
+```text
 Visibility ->
       `pub`
     | `pub` `(` `crate` `)`
@@ -238,15 +238,6 @@ impl SecretPoint {
 ```
 
 Private fields prevent external code from directly constructing or pattern-matching the struct — callers must use constructor functions or builder patterns instead.
-
-## Visibility in Trait Implementations
-
-When implementing a trait:
-
-- **The trait is `pub`**: The associated items in the implementation are accessible to anyone who can use the impl (because they are part of the trait's interface).
-- **The impl is for a private type**: The impl items are only accessible where the type itself is accessible.
-
-You cannot use visibility modifiers on items within a trait implementation — their visibility is determined by the trait declaration.
 
 ## Visibility and the Module Hierarchy
 

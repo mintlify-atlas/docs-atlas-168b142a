@@ -1,7 +1,7 @@
 ---
 title: "Rust Lexical Tokens: Literals, Operators, and Punctuation"
 sidebarTitle: "Tokens"
-description: "Complete reference to Rust's token types: integer, float, character, string, byte, boolean, and lifetime literals, plus all punctuation and delimiters."
+description: "Complete reference to Rust's token types: integer, float, character, string, byte, and lifetime literals, plus all punctuation and delimiters."
 ---
 
 Tokens are the primitive productions of Rust's grammar — the smallest meaningful units produced by the lexer before any syntactic analysis takes place. Every Rust source file is a sequence of tokens drawn from a small number of well-defined categories. This chapter describes each token kind in detail, including all literal forms, valid escape sequences, suffixes, punctuation symbols, and delimiters.
@@ -216,6 +216,9 @@ Note that `-1i8` is analyzed as two tokens: `-` followed by `1i8`.
   0x80.0;  // not `0x80` followed by `.0`
   0b101e;  // not a suffixed literal
   0b;      // not an integer literal
+  0b_;     // not an integer literal
+  2em;     // not a suffixed literal
+  2.0em;   // not a suffixed literal
   ```
 </Warning>
 
@@ -247,17 +250,6 @@ Note that `2.f64` would be interpreted as calling a method named `f64` on `2`. U
 ```rust,compile_fail
 2e;   // error: exponent with no digits
 2.0e; // error: exponent with no digits
-```
-
----
-
-### Boolean Literals
-
-The boolean type has exactly two literal values, both of which are strict keywords:
-
-```rust
-let t: bool = true;
-let f: bool = false;
 ```
 
 ---
@@ -308,10 +300,11 @@ Punctuation tokens serve as operators, separators, and structural markers throug
 
 ```
 ...   ..=   <<=   >>=   !=    %=    &&    &=    *=    +=
--=    ->    ..    /=    ::    <<    <=    ==    =>    >=
->>    ^=    |=    ||    !     #     $     %     &     *
-+     ,     -     .     /     :     ;     <     =     >
-?     @     [     ]     ^     {     |     }     ~
+-=    ->    ..    /=    ::    <-    <<    <=    ==    =>
+>=    >>    ^=    |=    ||    !     #     $     %     &
+(     )     *     +     ,     -     .     /     :     ;
+<     =     >     ?     @     [     ]     ^     {     |
+}     ~
 ```
 
 ---

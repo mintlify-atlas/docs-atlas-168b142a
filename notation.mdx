@@ -50,7 +50,7 @@ This is known as a *hard cut* — it prevents all backtracking past the cut poin
 
 ## String Table Productions
 
-Some rules in the grammar — notably unary operators, binary operators, and keywords — are given in a simplified form: as a listing of printable strings. These form a subset of the rules regarding the [token](https://doc.rust-lang.org/reference/tokens.html) rule, and are assumed to be the result of a lexical-analysis phase feeding the parser, driven by a DFA (Deterministic Finite Automaton), operating over the disjunction of all such string table entries.
+Some rules in the grammar — notably unary operators, binary operators, and keywords — are given in a simplified form: as a listing of printable strings. These form a subset of the rules regarding the [token](/lexical-structure/tokens) rule, and are assumed to be the result of a lexical-analysis phase feeding the parser, driven by a DFA (Deterministic Finite Automaton), operating over the disjunction of all such string table entries.
 
 When such a string in `monospace` font appears inside a grammar block, it is an implicit reference to a single member of such a string table production.
 
@@ -61,11 +61,3 @@ Below each grammar block in the reference is a button to toggle the display of a
 - A **square element** is a non-terminal rule.
 - A **rounded rectangle** is a terminal.
 
-## Nonterminals
-
-Grammar nonterminals appear in two forms:
-
-- `CAPITAL_WITH_UNDERSCORES` — tokens produced by the lexer (e.g., `INTEGER_LITERAL`, `IDENTIFIER`)
-- *ItalicCamelCase* — syntactical productions built from tokens (e.g., *LetStatement*, *FunctionItem*)
-
-Nonterminals defined with `@root` are top-level entry points for the lexer or parser.

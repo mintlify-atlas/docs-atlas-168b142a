@@ -91,7 +91,18 @@ struct MyType(*mut i32);
 unsafe impl Send for MyType {}
 ```
 
-### 6. Declaring an `extern` block (2024 edition)
+### 6. Calling a safe `target_feature` function from a function without that feature
+
+Calling a safe function annotated with `#[target_feature]` from a function that does not have that target feature enabled is unsafe, because the function may execute instructions not supported by the current CPU:
+
+```rust
+#[target_feature(enable = "avx2")]
+unsafe fn uses_avx2() {
+    // uses AVX2 instructions
+}
+```
+
+### 7. Declaring an `extern` block (2024 edition)
 
 External blocks declare functions and statics from other languages. The programmer must assert that the signatures are correct:
 
@@ -105,7 +116,7 @@ unsafe extern "C" {
 Prior to the 2024 edition, `extern` blocks did not require the `unsafe` keyword. From Rust 2024 onward, `extern` blocks must be qualified as `unsafe extern`.
 </Note>
 
-### 7. Applying an unsafe attribute
+### 8. Applying an unsafe attribute
 
 Some attributes have safety conditions that the compiler cannot verify. These must use the `unsafe(...)` syntax:
 
@@ -213,6 +224,7 @@ The standard library is built extensively on this pattern. `Vec<T>`, `String`, `
 | Read/write `static mut` | ❌ | `unsafe {}` or `unsafe fn` |
 | Access union field | ❌ | `unsafe {}` or `unsafe fn` |
 | Call `unsafe fn` | ❌ | `unsafe {}` or `unsafe fn` |
+| Call safe `#[target_feature]` fn without that feature | ❌ | `unsafe {}` or `unsafe fn` |
 | Implement `unsafe trait` | ❌ | `unsafe impl` |
 | Declare `extern` block (2024+) | ❌ | `unsafe extern` |
 | Apply unsafe attribute | ❌ | `#[unsafe(attr)]` |
